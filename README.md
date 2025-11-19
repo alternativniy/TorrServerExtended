@@ -68,53 +68,46 @@ The script supports interactive and non-interactive installation, configuration,
 
 - **Install/Update**: Choose to install or update TorrServer
 - **Reconfigure**: If TorrServer is already installed, you'll be prompted to reconfigure settings (port, auth, read-only mode, logging, BBR)
-- **Uninstall**: Type `Delete` (or `удалить` in Russian) to uninstall TorrServer
+- **Uninstall**: Type `Delete` (or `Удалить` in Russian) to uninstall TorrServer
 
-**Command-line options:**
+**Download first and set execute permissions:**
 
-- Install a specific version:  
+```bash
+curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh -o installTorrServerLinux.sh && chmod 755 installTorrServerLinux.sh
+```
 
+**Command-line examples:**
+
+- Install a specific version:
   ```bash
-  curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh | sudo bash -s -- --install 135 --silent
+  sudo bash ./installTorrServerLinux.sh --install 135 --silent
+  ```
+- Update to latest version:
+  ```bash
+  sudo bash ./installTorrServerLinux.sh --update --silent
+  ```
+- Reconfigure settings interactively:
+  ```bash
+  sudo bash ./installTorrServerLinux.sh --reconfigure
+  ```
+- Check for updates:
+  ```bash
+  sudo bash ./installTorrServerLinux.sh --check
+  ```
+- Downgrade to a specific version:
+  ```bash
+  sudo bash ./installTorrServerLinux.sh --down 135
+  ```
+- Remove/uninstall:
+  ```bash
+  sudo bash ./installTorrServerLinux.sh --remove --silent
+  ```
+- Change the systemd service user:
+  ```bash
+  sudo bash ./installTorrServerLinux.sh --change-user root --silent
   ```
 
-- Update to latest version:  
-
-  ```bash
-  curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh | sudo bash -s -- --update --silent
-  ```
-
-- Reconfigure settings interactively:  
-
-  ```bash
-  sudo ./installTorrServerLinux.sh --reconfigure
-  ```
-
-- Check for updates:  
-
-  ```bash
-  sudo ./installTorrServerLinux.sh --check
-  ```
-
-- Downgrade to a specific version:  
-
-  ```bash
-  sudo ./installTorrServerLinux.sh --down 135
-  ```
-
-- Remove/uninstall:  
-
-  ```bash
-  curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh | sudo bash -s -- --remove --silent
-  ```
-
-- Change the systemd service user:  
-
-  ```bash
-  curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh | sudo bash -s -- --change-user root --silent
-  ```
-
-**Available commands:**
+**All available commands:**
 
 - `--install [VERSION]` - Install latest or specific version
 - `--update` - Update to latest version
