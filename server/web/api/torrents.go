@@ -18,13 +18,15 @@ import (
 // Action: add, get, set, rem, list, drop
 type torrReqJS struct {
 	requestI
-	Link     string `json:"link,omitempty"`
-	Hash     string `json:"hash,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Category string `json:"category,omitempty"`
-	Poster   string `json:"poster,omitempty"`
-	Data     string `json:"data,omitempty"`
-	SaveToDB bool   `json:"save_to_db,omitempty"`
+	Link           string `json:"link,omitempty"`
+	Hash           string `json:"hash,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Category       string `json:"category,omitempty"`
+	Poster         string `json:"poster,omitempty"`
+	Data           string `json:"data,omitempty"`
+	SaveToDB       bool   `json:"save_to_db,omitempty"`
+	DownloadToDisk bool   `json:"download_to_disk,omitempty"`
+	DeleteFiles    bool   `json:"delete_files,omitempty"`
 }
 
 // torrents godoc
@@ -108,6 +110,14 @@ func addTorrent(req torrReqJS, c *gin.Context) {
 		return
 	}
 
+	if req.DownloadToDisk {
+		if _, err := torr.CreateDownloadJobForTorrent(tor, req.Title, nil, ""); err != nil {
+			log.TLogln("error queue torrent download:", err)
+			c.AbortWithError(http.StatusInternalServerError, err)
+			return
+		}
+	}
+
 	go func() {
 		if !tor.GotInfo() {
 			log.TLogln("error add torrent:", "timeout connection get torrent info")
@@ -165,7 +175,7 @@ func remTorrent(req torrReqJS, c *gin.Context) {
 		c.AbortWithError(http.StatusBadRequest, errors.New("hash is empty"))
 		return
 	}
-	torr.RemTorrent(req.Hash)
+	torr.RemTorrent(req.Hash, req.DeleteFiles)
 	// TODO: remove
 	if set.BTsets.EnableDLNA {
 		dlna.Stop()
@@ -199,7 +209,7 @@ func dropTorrent(req torrReqJS, c *gin.Context) {
 func wipeTorrents(c *gin.Context) {
 	torrents := torr.ListTorrent()
 	for _, t := range torrents {
-		torr.RemTorrent(t.TorrentSpec.InfoHash.HexString())
+		torr.RemTorrent(t.TorrentSpec.InfoHash.HexString(), false)
 	}
 	// TODO: remove (copied todo from remTorrent())
 	if set.BTsets.EnableDLNA {

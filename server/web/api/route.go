@@ -25,6 +25,14 @@ func SetupRoute(route gin.IRouter) {
 
 	authorized.POST("/cache", cache)
 
+	authorized.GET("/downloads", downloadList)
+	authorized.POST("/downloads", downloadCreate)
+	authorized.GET("/downloads/:id", downloadGet)
+	authorized.POST("/downloads/:id/pause", downloadPause)
+	authorized.POST("/downloads/:id/resume", downloadResume)
+	authorized.POST("/downloads/:id/stop", downloadStop)
+	authorized.DELETE("/downloads/:id", downloadDelete)
+
 	route.HEAD("/stream", stream)
 	route.GET("/stream", stream)
 

@@ -40,7 +40,7 @@ export default function PrimarySettingsComponent({
   updateSettings,
 }) {
   const { t } = useTranslation()
-  const { UseDisk, TorrentsSavePath, RemoveCacheOnDrop } = settings || {}
+  const { UseDisk, TorrentsSavePath, RemoveCacheOnDrop, DownloadPath } = settings || {}
   const preloadCacheSize = Math.round((cacheSize / 100) * preloadCachePercentage)
 
   return (
@@ -148,6 +148,17 @@ export default function PrimarySettingsComponent({
             label={t('SettingsDialog.TorrentsSavePath')}
             value={TorrentsSavePath}
             type='url'
+            variant='outlined'
+            fullWidth
+          />
+          <TextField
+            onChange={inputForm}
+            margin='normal'
+            id='DownloadPath'
+            label={t('SettingsDialog.DownloadPath')}
+            helperText={t('SettingsDialog.DownloadPathHint')}
+            value={DownloadPath}
+            type='text'
             variant='outlined'
             fullWidth
           />

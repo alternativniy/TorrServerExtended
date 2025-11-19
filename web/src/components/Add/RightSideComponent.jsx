@@ -4,11 +4,13 @@ import { NoImageIcon } from 'icons'
 import {
   FormControl,
   FormHelperText,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   MenuItem,
   Select,
   TextField,
+  Checkbox,
   useTheme,
 } from '@material-ui/core'
 import { HighlightOff as HighlightOffIcon } from '@material-ui/icons'
@@ -52,6 +54,8 @@ export default function RightSideComponent({
   isCustomTitleEnabled,
   setIsCustomTitleEnabled,
   isEditMode,
+  downloadToDisk,
+  setDownloadToDisk,
 }) {
   const { t } = useTranslation()
   const primary = useTheme().palette.primary.main
@@ -186,6 +190,20 @@ export default function RightSideComponent({
             ))}
           </Select>
         </FormControl>
+
+        {!isEditMode && (
+          <FormControlLabel
+            style={{ marginTop: '0.5em' }}
+            control={
+              <Checkbox
+                color='primary'
+                checked={downloadToDisk}
+                onChange={({ target: { checked } }) => setDownloadToDisk(checked)}
+              />
+            }
+            label={t('AddDialog.DownloadToDisk')}
+          />
+        )}
 
         <PosterWrapper>
           <Poster poster={+isPosterUrlCorrect}>

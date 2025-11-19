@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"server/log"
@@ -20,6 +22,8 @@ type BTSets struct {
 	UseDisk           bool
 	TorrentsSavePath  string
 	RemoveCacheOnDrop bool
+	DownloadPath      string
+	MaxDownloadJobs   int
 
 	// Torrent
 	ForceEncrypt             bool
@@ -92,6 +96,12 @@ func SetBTSets(sets *BTSets) {
 		sets.PreloadCache = 100
 	}
 
+	if sets.MaxDownloadJobs <= 0 {
+		sets.MaxDownloadJobs = 3
+	}
+
+	sets.DownloadPath = resolveDownloadBasePath(sets.DownloadPath)
+
 	if sets.TorrentsSavePath == "" {
 		sets.UseDisk = false
 	} else if sets.UseDisk {
@@ -130,6 +140,8 @@ func SetDefaultConfig() {
 	sets.RetrackersMode = 1
 	sets.TorrentDisconnectTimeout = 30
 	sets.ReaderReadAHead = 95 // 95%
+	sets.MaxDownloadJobs = 3
+	sets.DownloadPath = resolveDownloadBasePath("")
 	BTsets = sets
 	if !ReadOnly {
 		buf, err := json.Marshal(BTsets)
@@ -155,4 +167,69 @@ func loadBTSets() {
 	}
 	// initialize defaults on error
 	SetDefaultConfig()
+}
+
+func resolveDownloadBasePath(requested string) string {
+	candidates := candidateDownloadDirs(strings.TrimSpace(requested))
+	for _, dir := range candidates {
+		if dir == "" {
+			continue
+		}
+		if resolved, ok := ensureWritableDir(dir); ok {
+			return resolved
+		}
+	}
+	fallback := filepath.Join(Path, "downloads")
+	if resolved, ok := ensureWritableDir(fallback); ok {
+		return resolved
+	}
+	if resolved, ok := ensureWritableDir(filepath.Join(os.TempDir(), "torrserver-downloads")); ok {
+		return resolved
+	}
+	return fallback
+}
+
+func candidateDownloadDirs(requested string) []string {
+	list := make([]string, 0, 6)
+	if requested != "" {
+		list = append(list, filepath.Clean(requested))
+	}
+	if env := strings.TrimSpace(os.Getenv("TORRSERVER_DOWNLOAD_PATH")); env != "" {
+		list = append(list, filepath.Clean(env))
+	}
+	if runtime.GOOS == "windows" {
+		if home := strings.TrimSpace(os.Getenv("USERPROFILE")); home != "" {
+			list = append(list, filepath.Join(home, "Downloads", "TorrServer"))
+		}
+		if Path != "" {
+			list = append(list, filepath.Join(Path, "downloads"))
+		}
+	} else {
+		list = append(list, "/downloads")
+		if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+			list = append(list, filepath.Join(home, "Downloads", "torrserver"))
+		}
+		if Path != "" {
+			list = append(list, filepath.Join(Path, "downloads"))
+		}
+	}
+	return list
+}
+
+func ensureWritableDir(dir string) (string, bool) {
+	cleaned := filepath.Clean(dir)
+	if cleaned == "" || cleaned == string(os.PathSeparator) || cleaned == "." {
+		return "", false
+	}
+	if err := os.MkdirAll(cleaned, 0o755); err != nil {
+		log.TLogln("resolveDownloadBasePath: mkdir failed", cleaned, err)
+		return "", false
+	}
+	testFile := filepath.Join(cleaned, ".torrserver-write-test")
+	if err := os.WriteFile(testFile, []byte("ok"), 0o644); err != nil {
+		log.TLogln("resolveDownloadBasePath: write test failed", cleaned, err)
+		return "", false
+	}
+	_ = os.Remove(testFile)
+	return cleaned, true
 }

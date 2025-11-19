@@ -48,6 +48,7 @@ export default function AddDialog({
   const [skipDebounce, setSkipDebounce] = useState(false)
   const [isCustomTitleEnabled, setIsCustomTitleEnabled] = useState(false)
   const [currentSourceHash, setCurrentSourceHash] = useState()
+  const [downloadToDisk, setDownloadToDisk] = useState(false)
 
   const ref = useOnStandaloneAppOutsideClick(handleClose)
 
@@ -220,6 +221,7 @@ export default function AddDialog({
       title && data.append('title', title)
       category && data.append('category', category)
       posterUrl && data.append('poster', posterUrl)
+      data.append('download_to_disk', downloadToDisk ? 'true' : 'false')
       axios.post(torrentUploadHost(), data).catch(handleClose)
     } else {
       // link save
@@ -231,6 +233,7 @@ export default function AddDialog({
           category,
           poster: posterUrl,
           save_to_db: true,
+          download_to_disk: downloadToDisk,
         })
         .catch(handleClose)
     }
@@ -276,6 +279,8 @@ export default function AddDialog({
           isCustomTitleEnabled={isCustomTitleEnabled}
           setIsCustomTitleEnabled={setIsCustomTitleEnabled}
           isEditMode={isEditMode}
+          downloadToDisk={downloadToDisk}
+          setDownloadToDisk={setDownloadToDisk}
         />
       </Content>
 

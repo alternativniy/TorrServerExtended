@@ -9,7 +9,7 @@ export const TorrentCard = styled.div`
     border-radius: 5px;
     display: grid;
     grid-template-columns: 120px 260px 1fr;
-    grid-template-rows: 180px;
+    grid-template-rows: min-content;
     grid-template-areas: 'poster description buttons';
     gap: 10px;
     padding: 10px;
@@ -22,12 +22,11 @@ export const TorrentCard = styled.div`
         'buttons buttons';
 
       grid-template-columns: 70px 1fr;
-      grid-template-rows: 110px max-content;
+      grid-template-rows: max-content max-content;
     }
 
     @media (max-width: 770px) {
       grid-template-columns: 60px 1fr;
-      grid-template-rows: 90px max-content;
     }
   `}
 `
@@ -101,12 +100,12 @@ export const TorrentCardDescription = styled.div`
     background: ${cardSecondaryColor};
     border-radius: 5px;
     padding: 5px;
-    display: grid;
-    grid-template-rows: 55% 1fr;
+    display: flex;
+    flex-flow: column;
+    justify-content: space-between;
     gap: 10px;
 
     @media (max-width: 770px) {
-      grid-template-rows: 60% 1fr;
       gap: 3px;
     }
 
@@ -156,6 +155,7 @@ export const TorrentCardDescription = styled.div`
       display: grid;
       grid-template-columns: 80px 80px 1fr;
       align-self: end;
+      width: 100%;
 
       @media (max-width: 1260px), (max-height: 500px) {
         grid-template-columns: 70px 70px 1fr;
@@ -194,6 +194,66 @@ export const TorrentCardDescription = styled.div`
       @media (max-width: 410px) {
         font-size: 9px;
       }
+    }
+
+    .download-status {
+      border-top: 1px solid ${accentCardColor};
+      padding-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+
+      .MuiLinearProgress-root {
+        height: 8px;
+        border-radius: 4px;
+      }
+    }
+
+    .download-status__actions {
+      display: flex;
+      gap: 3px;
+
+      @media (max-width: 410px) {
+        flex-flow: column;
+      }
+    }
+
+    .download-status__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      text-transform: uppercase;
+      color: ${accentCardColor};
+      gap: 6px;
+    }
+
+    .download-status__chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #fff;
+      text-transform: capitalize;
+    }
+
+    .download-status__meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.8);
+
+      @media (max-width: 770px) {
+        font-size: 10px;
+      }
+    }
+
+    .download-status__error {
+      font-size: 11px;
+      color: #ff9f43;
+      word-break: break-word;
     }
   `}
 `
@@ -245,6 +305,42 @@ export const StyledButton = styled.button`
     @media (max-width: 420px) {
       font-size: 0.6rem;
       padding: 7px 5px;
+    }
+  `}
+`
+
+export const SmallStyledButton = styled.button`
+  ${({
+    theme: {
+      torrentCard: { buttonBGColor, accentCardColor },
+    },
+  }) => css`
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-transform: uppercase;
+    background: ${buttonBGColor};
+    color: #fff;
+    font-size: 0.6rem;
+    letter-spacing: 0.009em;
+    padding: 0 3px;
+    height: 20px;
+    width: 100%;
+    min-width: max-content;
+    svg {
+      width: 12px;
+    }
+
+    > :first-child {
+      margin-right: 5px;
+    }
+
+    :hover {
+      background: ${accentCardColor};
     }
   `}
 `

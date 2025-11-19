@@ -282,9 +282,11 @@ func (t *Torrent) Close() bool {
 	}
 	t.Stat = state.TorrentClosed
 
-	t.bt.mu.Lock()
-	delete(t.bt.torrents, t.Hash())
-	t.bt.mu.Unlock()
+	if t.bt != nil {
+		t.bt.mu.Lock()
+		delete(t.bt.torrents, t.Hash())
+		t.bt.mu.Unlock()
+	}
 
 	t.drop()
 	return true
@@ -352,6 +354,12 @@ func (t *Torrent) Status() *state.TorrentStatus {
 					Length: f.Length(),
 				})
 			}
+		}
+	}
+
+	if st.Hash != "" {
+		if downloads := ListDownloadStatusesByHash(st.Hash); len(downloads) > 0 {
+			st.Downloads = downloads
 		}
 	}
 

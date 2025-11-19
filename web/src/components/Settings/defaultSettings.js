@@ -5,6 +5,8 @@ export default {
   UseDisk: false,
   TorrentsSavePath: '',
   RemoveCacheOnDrop: false,
+  DownloadPath: '',
+  MaxDownloadJobs: 3,
   ForceEncrypt: false,
   RetrackersMode: 1,
   TorrentDisconnectTimeout: 30,

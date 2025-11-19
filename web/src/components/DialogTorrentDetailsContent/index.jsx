@@ -8,6 +8,7 @@ import { viewedHost } from 'utils/Hosts'
 import { GETTING_INFO, IN_DB } from 'torrentStates'
 import CircularProgress from '@material-ui/core/CircularProgress'
 import { useTranslation } from 'react-i18next'
+import getDefaultDownloadPath from 'utils/downloadPaths'
 
 import { useUpdateCache, useGetSettings } from './customHooks'
 import DialogHeader from './DialogHeader'
@@ -51,6 +52,7 @@ export default function DialogTorrentDetailsContent({ closeDialog, torrent }) {
     poster,
     hash,
     title,
+    data,
     category,
     name,
     stat,
@@ -58,10 +60,12 @@ export default function DialogTorrentDetailsContent({ closeDialog, torrent }) {
     upload_speed: uploadSpeed,
     torrent_size: torrentSize,
     file_stats: torrentFileList,
+    downloads = [],
   } = torrent
 
   const cache = useUpdateCache(hash)
   const settings = useGetSettings(cache)
+  const resolvedDownloadPath = getDefaultDownloadPath(settings?.DownloadPath, category)
 
   const { Capacity, PiecesCount, PiecesLength, Filled } = cache
 
@@ -196,7 +200,13 @@ export default function DialogTorrentDetailsContent({ closeDialog, torrent }) {
                   playableFileList={playableFileList}
                   name={name}
                   title={title}
+                  category={category}
+                  poster={poster}
+                  data={data}
                   setViewedFileList={setViewedFileList}
+                  fileStats={torrentFileList}
+                  downloadPath={resolvedDownloadPath}
+                  downloads={downloads}
                 />
               </div>
             </MainSection>

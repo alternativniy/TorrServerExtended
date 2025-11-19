@@ -4,6 +4,7 @@ import {
   PlayArrow as PlayArrowIcon,
   Close as CloseIcon,
   Delete as DeleteIcon,
+  CloudDownload as CloudDownloadIcon,
 } from '@material-ui/icons'
 import { getPeerString, humanizeSize, humanizeSpeed, removeRedundantCharacters } from 'utils/Utils'
 import { playlistTorrHost, streamHost, torrentsHost } from 'utils/Hosts'
@@ -11,7 +12,17 @@ import { NoImageIcon } from 'icons'
 import DialogTorrentDetailsContent from 'components/DialogTorrentDetailsContent'
 import Dialog from '@material-ui/core/Dialog'
 import Slide from '@material-ui/core/Slide'
-import { Button, DialogActions, DialogTitle, useMediaQuery, useTheme } from '@material-ui/core'
+import {
+  Button,
+  Checkbox,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  FormControlLabel,
+  useMediaQuery,
+  useTheme,
+} from '@material-ui/core'
 import axios from 'axios'
 import ptt from 'parse-torrent-title'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +33,9 @@ import { GETTING_INFO, IN_DB, CLOSED, PRELOAD, WORKING } from 'torrentStates'
 import { TORRENT_CATEGORIES } from 'components/categories'
 import VideoPlayer from 'components/VideoPlayer'
 import { isFilePlayable } from 'components/DialogTorrentDetailsContent/helpers'
+import DownloadDialog from 'components/DialogTorrentDetailsContent/TorrentFunctions/DownloadDialog'
+import { useQueryClient } from 'react-query'
+import TorrentDownloadControls from 'components/TorrentDownloadControls'
 
 import {
   StatusIndicators,
@@ -38,15 +52,24 @@ const Torrent = ({ torrent }) => {
   const { t } = useTranslation()
   const [isDetailedInfoOpened, setIsDetailedInfoOpened] = useState(false)
   const [isDeleteTorrentOpened, setIsDeleteTorrentOpened] = useState(false)
+  const [deleteWithFiles, setDeleteWithFiles] = useState(false)
   const [isSupported, setIsSupported] = useState(true)
+  const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false)
 
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'))
+  const queryClient = useQueryClient()
 
   const openDetailedInfo = () => setIsDetailedInfoOpened(true)
   const closeDetailedInfo = () => setIsDetailedInfoOpened(false)
-  const openDeleteTorrentAlert = () => setIsDeleteTorrentOpened(true)
-  const closeDeleteTorrentAlert = () => setIsDeleteTorrentOpened(false)
+  const openDeleteTorrentAlert = () => {
+    setDeleteWithFiles(false)
+    setIsDeleteTorrentOpened(true)
+  }
+  const closeDeleteTorrentAlert = () => {
+    setDeleteWithFiles(false)
+    setIsDeleteTorrentOpened(false)
+  }
 
   const {
     title,
@@ -58,10 +81,21 @@ const Torrent = ({ torrent }) => {
     hash,
     stat,
     data,
+    downloads = [],
   } = torrent
 
-  const dropTorrent = () => axios.post(torrentsHost(), { action: 'drop', hash })
-  const deleteTorrent = () => axios.post(torrentsHost(), { action: 'rem', hash })
+  const hasDownloads = downloads?.length > 0
+
+  const refreshTorrents = () => queryClient.invalidateQueries('torrents')
+  const dropTorrent = () => axios.post(torrentsHost(), { action: 'drop', hash }).then(refreshTorrents)
+  const deleteTorrent = () =>
+    axios.post(torrentsHost(), { action: 'rem', hash, delete_files: deleteWithFiles }).then(() => {
+      refreshTorrents()
+      setDeleteWithFiles(false)
+    })
+
+  const handleOpenDownloadDialog = () => setIsDownloadDialogOpen(true)
+  const handleCloseDownloadDialog = () => setIsDownloadDialogOpen(false)
 
   const getParsedTitle = () => {
     const parse = key => ptt.parse(title || '')?.[key] || ptt.parse(name || '')?.[key]
@@ -132,7 +166,14 @@ const Torrent = ({ torrent }) => {
             </StyledButton>
           )}
 
-          <StyledButton onClick={() => dropTorrent(torrent)}>
+          {!hasDownloads && (
+            <StyledButton onClick={handleOpenDownloadDialog}>
+              <CloudDownloadIcon />
+              <span>{t('Download')}</span>
+            </StyledButton>
+          )}
+
+          <StyledButton onClick={dropTorrent}>
             <CloseIcon />
             <span>{t('Drop')}</span>
           </StyledButton>
@@ -151,27 +192,40 @@ const Torrent = ({ torrent }) => {
             <div className='description-torrent-title'>{parsedTitle}</div>
           </div>
 
-          <div className='description-statistics-wrapper'>
-            <div className='description-statistics-element-wrapper'>
-              <div className='description-section-name'>
-                <StatusIndicator stat={stat} />
-                {t('Size')}
-              </div>
-              <div className='description-statistics-element-value'>{torrentSize > 0 && humanizeSize(torrentSize)}</div>
-            </div>
+          {hasDownloads && (
+            <TorrentDownloadControls
+              downloads={downloads}
+              variant='card'
+              downloadSpeed={downloadSpeed}
+              onActionComplete={refreshTorrents}
+            />
+          )}
 
-            <div className='description-statistics-element-wrapper'>
-              <div className='description-section-name'>{t('Speed')}</div>
-              <div className='description-statistics-element-value'>
-                {downloadSpeed > 0 ? humanizeSpeed(downloadSpeed) : '---'}
+          {(!downloads || downloads.length === 0) && (
+            <div className='description-statistics-wrapper'>
+              <div className='description-statistics-element-wrapper'>
+                <div className='description-section-name'>
+                  <StatusIndicator stat={stat} />
+                  {t('Size')}
+                </div>
+                <div className='description-statistics-element-value'>
+                  {torrentSize > 0 && humanizeSize(torrentSize)}
+                </div>
+              </div>
+
+              <div className='description-statistics-element-wrapper'>
+                <div className='description-section-name'>{t('Speed')}</div>
+                <div className='description-statistics-element-value'>
+                  {downloadSpeed > 0 ? humanizeSpeed(downloadSpeed) : '---'}
+                </div>
+              </div>
+
+              <div className='description-statistics-element-wrapper'>
+                <div className='description-section-name'>{t('Peers')}</div>
+                <div className='description-statistics-element-value'>{getPeerString(torrent) || '---'}</div>
               </div>
             </div>
-
-            <div className='description-statistics-element-wrapper'>
-              <div className='description-section-name'>{t('Peers')}</div>
-              <div className='description-statistics-element-value'>{getPeerString(torrent) || '---'}</div>
-            </div>
-          </div>
+          )}
         </TorrentCardDescription>
       </TorrentCard>
 
@@ -189,6 +243,19 @@ const Torrent = ({ torrent }) => {
 
       <Dialog open={isDeleteTorrentOpened} onClose={closeDeleteTorrentAlert}>
         <DialogTitle>{t('DeleteTorrent?')}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>{t('DeleteTorrentWarning')}</DialogContentText>
+          <FormControlLabel
+            control={
+              <Checkbox
+                color='primary'
+                checked={deleteWithFiles}
+                onChange={(_, checked) => setDeleteWithFiles(checked)}
+              />
+            }
+            label={t('DeleteTorrentDeleteFiles')}
+          />
+        </DialogContent>
         <DialogActions>
           <Button variant='outlined' onClick={closeDeleteTorrentAlert} color='secondary'>
             {t('Cancel')}
@@ -197,7 +264,7 @@ const Torrent = ({ torrent }) => {
           <Button
             variant='contained'
             onClick={() => {
-              deleteTorrent(torrent)
+              deleteTorrent()
               closeDeleteTorrentAlert()
             }}
             color='secondary'
@@ -216,6 +283,15 @@ const Torrent = ({ torrent }) => {
           poster={poster}
           handleClose={handleCloseEditDialog}
           category={category}
+        />
+      )}
+
+      {isDownloadDialogOpen && (
+        <DownloadDialog
+          open={isDownloadDialogOpen}
+          handleClose={handleCloseDownloadDialog}
+          torrent={{ hash, title, name, category, poster, data }}
+          fileStats={fileList}
         />
       )}
     </>

@@ -18,6 +18,7 @@ var bts *BTServer
 
 func InitApiHelper(bt *BTServer) {
 	bts = bt
+	UpdateDownloadSettings()
 }
 
 func LoadTorrent(tor *Torrent) *Torrent {
@@ -158,12 +159,13 @@ func SetTorrent(hashHex, title, poster, category string, data string) *Torrent {
 	}
 }
 
-func RemTorrent(hashHex string) {
+func RemTorrent(hashHex string, deleteFiles bool) {
 	if sets.ReadOnly {
 		log.TLogln("API RemTorrent: Read-only DB mode!", hashHex)
 		return
 	}
 	hash := metainfo.NewHashFromHex(hashHex)
+	RemoveDownloadJobsByHash(hashHex, deleteFiles)
 	if bts.RemoveTorrent(hash) {
 		if sets.BTsets.UseDisk && hashHex != "" && hashHex != "/" {
 			name := filepath.Join(sets.BTsets.TorrentsSavePath, hashHex)
@@ -217,6 +219,7 @@ func SetSettings(set *sets.BTSets) {
 		return
 	}
 	sets.SetBTSets(set)
+	UpdateDownloadSettings()
 	log.TLogln("drop all torrents")
 	dropAllTorrent()
 	time.Sleep(time.Second * 1)
@@ -234,6 +237,7 @@ func SetDefSettings() {
 		return
 	}
 	sets.SetDefaultConfig()
+	UpdateDownloadSettings()
 	log.TLogln("drop all torrents")
 	dropAllTorrent()
 	time.Sleep(time.Second * 1)

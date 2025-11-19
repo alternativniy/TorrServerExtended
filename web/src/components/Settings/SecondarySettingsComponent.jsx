@@ -38,6 +38,7 @@ export default function SecondarySettingsComponent({ settings, inputForm }) {
     SslPort,
     SslCert,
     SslKey,
+    MaxDownloadJobs,
   } = settings || {}
 
   return (
@@ -104,6 +105,18 @@ export default function SecondarySettingsComponent({ settings, inputForm }) {
         label={t('SettingsDialog.ConnectionsLimit')}
         helperText={t('SettingsDialog.ConnectionsLimitHint')}
         value={ConnectionsLimit}
+        type='number'
+        variant='outlined'
+        fullWidth
+      />
+      <br />
+      <TextField
+        onChange={inputForm}
+        margin='normal'
+        id='MaxDownloadJobs'
+        label={t('SettingsDialog.MaxDownloadJobs')}
+        helperText={t('SettingsDialog.MaxDownloadJobsHint')}
+        value={MaxDownloadJobs}
         type='number'
         variant='outlined'
         fullWidth
