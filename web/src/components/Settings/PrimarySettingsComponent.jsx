@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { USBIcon, RAMIcon } from 'icons'
-import { FormControlLabel, Switch } from '@material-ui/core'
+import { FormControlLabel, FormGroup, FormHelperText, Switch } from '@material-ui/core'
 import TextField from '@material-ui/core/TextField'
 
 import {
@@ -40,7 +40,16 @@ export default function PrimarySettingsComponent({
   updateSettings,
 }) {
   const { t } = useTranslation()
-  const { UseDisk, TorrentsSavePath, RemoveCacheOnDrop, DownloadPath } = settings || {}
+  const {
+    UseDisk,
+    TorrentsSavePath,
+    RemoveCacheOnDrop,
+    DownloadPath,
+    DataPath,
+    StreamPath,
+    GenerateStrmFiles,
+    ForceGenerateStrmFiles,
+  } = settings || {}
   const preloadCacheSize = Math.round((cacheSize / 100) * preloadCachePercentage)
 
   return (
@@ -151,17 +160,6 @@ export default function PrimarySettingsComponent({
             variant='outlined'
             fullWidth
           />
-          <TextField
-            onChange={inputForm}
-            margin='normal'
-            id='DownloadPath'
-            label={t('SettingsDialog.DownloadPath')}
-            helperText={t('SettingsDialog.DownloadPathHint')}
-            value={DownloadPath}
-            type='text'
-            variant='outlined'
-            fullWidth
-          />
         </div>
       ) : (
         <CacheStorageSelector>
@@ -184,6 +182,74 @@ export default function PrimarySettingsComponent({
           </StorageButton>
         </CacheStorageSelector>
       )}
+
+      <div>
+        <SettingSectionLabel>{t('SettingsDialog.DataSectionTitle')}</SettingSectionLabel>
+
+        <TextField
+          onChange={inputForm}
+          margin='normal'
+          id='DataPath'
+          label={t('SettingsDialog.DataPath')}
+          helperText={t('SettingsDialog.DataPathHint')}
+          value={DataPath}
+          type='text'
+          variant='outlined'
+          fullWidth
+        />
+
+        <TextField
+          margin='normal'
+          id='DownloadPathDisplay'
+          label={t('SettingsDialog.DownloadPath')}
+          helperText={t('SettingsDialog.DownloadPathHint')}
+          value={DownloadPath}
+          type='text'
+          variant='outlined'
+          fullWidth
+          InputProps={{ readOnly: true }}
+        />
+
+        <TextField
+          margin='normal'
+          id='StreamPathDisplay'
+          label={t('SettingsDialog.StreamPath')}
+          helperText={t('SettingsDialog.StreamPathHint')}
+          value={StreamPath}
+          type='text'
+          variant='outlined'
+          fullWidth
+          InputProps={{ readOnly: true }}
+        />
+
+        <FormGroup>
+          <FormControlLabel
+            control={
+              <Switch checked={GenerateStrmFiles} onChange={inputForm} id='GenerateStrmFiles' color='secondary' />
+            }
+            label={t('SettingsDialog.GenerateStrmFiles')}
+            labelPlacement='start'
+          />
+          <FormHelperText margin='none'>{t('SettingsDialog.GenerateStrmFilesHint')}</FormHelperText>
+        </FormGroup>
+
+        <FormGroup>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ForceGenerateStrmFiles}
+                onChange={inputForm}
+                id='ForceGenerateStrmFiles'
+                color='secondary'
+                disabled={!GenerateStrmFiles}
+              />
+            }
+            label={t('SettingsDialog.ForceGenerateStrmFiles')}
+            labelPlacement='start'
+          />
+          <FormHelperText margin='none'>{t('SettingsDialog.ForceGenerateStrmFilesHint')}</FormHelperText>
+        </FormGroup>
+      </div>
     </MainSettingsContent>
   )
 }

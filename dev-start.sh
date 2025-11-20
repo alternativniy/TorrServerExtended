@@ -18,6 +18,9 @@ if ! command -v yarn >/dev/null 2>&1; then
   exit 1
 fi
 
+export TS_GEN_STRM_FILES=true
+export TS_FORCE_GEN_STRM_FILES=false
+
 pushd "$ROOT_DIR/server" >/dev/null
 GO111MODULE=on go run ./cmd &
 SERVER_PID=$!

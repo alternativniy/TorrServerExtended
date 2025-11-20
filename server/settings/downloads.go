@@ -8,19 +8,27 @@ import (
 )
 
 type DownloadJobRecord struct {
-	ID             string   `json:"id"`
-	Hash           string   `json:"hash"`
-	Title          string   `json:"title,omitempty"`
-	TargetPath     string   `json:"target_path"`
-	Files          []int    `json:"files,omitempty"`
-	OutputPaths    []string `json:"output_paths,omitempty"`
-	BytesTotal     int64    `json:"bytes_total"`
-	BytesCompleted int64    `json:"bytes_completed"`
-	Status         string   `json:"status"`
-	PauseRequested bool     `json:"pause_requested,omitempty"`
-	Error          string   `json:"error,omitempty"`
-	CreatedAt      int64    `json:"created_at"`
-	UpdatedAt      int64    `json:"updated_at"`
+	ID             string             `json:"id"`
+	Hash           string             `json:"hash"`
+	Title          string             `json:"title,omitempty"`
+	Category       string             `json:"category,omitempty"`
+	TargetPath     string             `json:"target_path"`
+	Files          []int              `json:"files,omitempty"`
+	OutputPaths    []string           `json:"output_paths,omitempty"`
+	FileMetas      []DownloadFileMeta `json:"file_metas,omitempty"`
+	BytesTotal     int64              `json:"bytes_total"`
+	BytesCompleted int64              `json:"bytes_completed"`
+	Status         string             `json:"status"`
+	PauseRequested bool               `json:"pause_requested,omitempty"`
+	Error          string             `json:"error,omitempty"`
+	CreatedAt      int64              `json:"created_at"`
+	UpdatedAt      int64              `json:"updated_at"`
+}
+
+type DownloadFileMeta struct {
+	ID     int    `json:"id"`
+	Path   string `json:"path"`
+	Length int64  `json:"length"`
 }
 
 var downloadsMu sync.Mutex

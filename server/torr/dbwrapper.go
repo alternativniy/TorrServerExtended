@@ -43,6 +43,7 @@ func AddTorrentDB(torr *Torrent) {
 	t.Timestamp = torr.Timestamp // time.Now().Unix()
 
 	settings.AddTorrent(t)
+	syncLibraryStrm(torr)
 }
 
 func GetTorrentDB(hash metainfo.Hash) *Torrent {

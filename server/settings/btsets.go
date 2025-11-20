@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"server/log"
@@ -23,6 +24,8 @@ type BTSets struct {
 	TorrentsSavePath  string
 	RemoveCacheOnDrop bool
 	DownloadPath      string
+	DataPath          string
+	StreamPath        string
 	MaxDownloadJobs   int
 
 	// Torrent
@@ -58,6 +61,10 @@ type BTSets struct {
 
 	// Reader
 	ResponsiveMode bool // enable Responsive reader (don't wait pieceComplete)
+
+	// Data
+	GenerateStrmFiles      bool
+	ForceGenerateStrmFiles bool
 }
 
 func (v *BTSets) String() string {
@@ -100,7 +107,7 @@ func SetBTSets(sets *BTSets) {
 		sets.MaxDownloadJobs = 3
 	}
 
-	sets.DownloadPath = resolveDownloadBasePath(sets.DownloadPath)
+	normalizeBTSets(sets)
 
 	if sets.TorrentsSavePath == "" {
 		sets.UseDisk = false
@@ -124,6 +131,7 @@ func SetBTSets(sets *BTSets) {
 	}
 
 	BTsets = sets
+	ensureDataDirectories(BTsets)
 	buf, err := json.Marshal(BTsets)
 	if err != nil {
 		log.TLogln("Error marshal btsets", err)
@@ -141,8 +149,9 @@ func SetDefaultConfig() {
 	sets.TorrentDisconnectTimeout = 30
 	sets.ReaderReadAHead = 95 // 95%
 	sets.MaxDownloadJobs = 3
-	sets.DownloadPath = resolveDownloadBasePath("")
+	normalizeBTSets(sets)
 	BTsets = sets
+	ensureDataDirectories(BTsets)
 	if !ReadOnly {
 		buf, err := json.Marshal(BTsets)
 		if err != nil {
@@ -161,6 +170,8 @@ func loadBTSets() {
 			if BTsets.ReaderReadAHead < 5 {
 				BTsets.ReaderReadAHead = 5
 			}
+			normalizeBTSets(BTsets)
+			ensureDataDirectories(BTsets)
 			return
 		}
 		log.TLogln("Error unmarshal btsets", err)
@@ -169,8 +180,33 @@ func loadBTSets() {
 	SetDefaultConfig()
 }
 
-func resolveDownloadBasePath(requested string) string {
-	candidates := candidateDownloadDirs(strings.TrimSpace(requested))
+func normalizeBTSets(sets *BTSets) {
+	if sets == nil {
+		return
+	}
+	legacyDownload := strings.TrimSpace(sets.DownloadPath)
+	migrated := strings.TrimSpace(sets.StreamPath) != "" || strings.TrimSpace(sets.DataPath) != ""
+	dataRoot, downloadsRoot, streamRoot := resolveDataRoots(strings.TrimSpace(sets.DataPath), legacyDownload)
+	sets.DataPath = dataRoot
+	sets.DownloadPath = downloadsRoot
+	sets.StreamPath = streamRoot
+	sets.GenerateStrmFiles = normalizeBooleanFlag(sets.GenerateStrmFiles, migrated, "TS_GEN_STRM_FILES", true)
+	sets.ForceGenerateStrmFiles = normalizeBooleanFlag(sets.ForceGenerateStrmFiles, migrated, "TS_FORCE_GEN_STRM_FILES", false)
+	if sets.ForceGenerateStrmFiles {
+		sets.GenerateStrmFiles = true
+	}
+}
+
+func resolveDataRoots(requestedDataRoot, legacyDownload string) (string, string, string) {
+	root := resolveDataPath(requestedDataRoot, legacyDownload)
+	if root == "" {
+		root = filepath.Join(Path, "data")
+	}
+	return root, filepath.Join(root, "downloads"), filepath.Join(root, "stream")
+}
+
+func resolveDataPath(requested, legacyDownload string) string {
+	candidates := candidateDataDirs(strings.TrimSpace(requested), legacyDownload)
 	for _, dir := range candidates {
 		if dir == "" {
 			continue
@@ -179,41 +215,96 @@ func resolveDownloadBasePath(requested string) string {
 			return resolved
 		}
 	}
-	fallback := filepath.Join(Path, "downloads")
-	if resolved, ok := ensureWritableDir(fallback); ok {
-		return resolved
+	fallbacks := []string{
+		filepath.Join(Path, "data"),
+		defaultDataRoot(),
+		filepath.Join(os.TempDir(), "torrserver-data"),
 	}
-	if resolved, ok := ensureWritableDir(filepath.Join(os.TempDir(), "torrserver-downloads")); ok {
-		return resolved
+	for _, dir := range fallbacks {
+		if dir == "" {
+			continue
+		}
+		if resolved, ok := ensureWritableDir(dir); ok {
+			return resolved
+		}
 	}
-	return fallback
+	return filepath.Join(os.TempDir(), "torrserver-data")
 }
 
-func candidateDownloadDirs(requested string) []string {
-	list := make([]string, 0, 6)
+func candidateDataDirs(requested, legacyDownload string) []string {
+	list := make([]string, 0, 8)
 	if requested != "" {
 		list = append(list, filepath.Clean(requested))
 	}
-	if env := strings.TrimSpace(os.Getenv("TORRSERVER_DOWNLOAD_PATH")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("TS_DATA_PATH")); env != "" {
 		list = append(list, filepath.Clean(env))
+	}
+	if legacy := normalizeLegacyDataRoot(legacyDownload); legacy != "" {
+		list = append(list, legacy)
+	}
+	if Path != "" {
+		list = append(list, filepath.Join(Path, "data"))
 	}
 	if runtime.GOOS == "windows" {
 		if home := strings.TrimSpace(os.Getenv("USERPROFILE")); home != "" {
-			list = append(list, filepath.Join(home, "Downloads", "TorrServer"))
-		}
-		if Path != "" {
-			list = append(list, filepath.Join(Path, "downloads"))
+			list = append(list, filepath.Join(home, "AppData", "Local", "TorrServer", "data"))
 		}
 	} else {
-		list = append(list, "/downloads")
+		list = append(list, "/opt/ts/data")
 		if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-			list = append(list, filepath.Join(home, "Downloads", "torrserver"))
-		}
-		if Path != "" {
-			list = append(list, filepath.Join(Path, "downloads"))
+			list = append(list, filepath.Join(home, ".local", "share", "torrserver", "data"))
 		}
 	}
 	return list
+}
+
+func normalizeLegacyDataRoot(legacy string) string {
+	legacy = strings.TrimSpace(legacy)
+	if legacy == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(legacy)
+	base := strings.ToLower(filepath.Base(cleaned))
+	if base == "downloads" {
+		parent := filepath.Dir(cleaned)
+		if parent != "" && parent != "." && parent != string(os.PathSeparator) {
+			return parent
+		}
+	}
+	return cleaned
+}
+
+func defaultDataRoot() string {
+	if runtime.GOOS == "windows" {
+		if home := strings.TrimSpace(os.Getenv("USERPROFILE")); home != "" {
+			return filepath.Join(home, "AppData", "Local", "TorrServer", "data")
+		}
+		return filepath.Join(os.TempDir(), "torrserver-data")
+	}
+	return "/opt/ts/data"
+}
+
+func normalizeBooleanFlag(current bool, migrated bool, envKey string, def bool) bool {
+	value := current
+	if !migrated {
+		value = def
+	}
+	if envVal, ok := lookupEnvBool(envKey); ok {
+		value = envVal
+	}
+	return value
+}
+
+func lookupEnvBool(key string) (bool, bool) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return false, false
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(val))
+	if err != nil {
+		return false, false
+	}
+	return parsed, true
 }
 
 func ensureWritableDir(dir string) (string, bool) {
@@ -222,14 +313,40 @@ func ensureWritableDir(dir string) (string, bool) {
 		return "", false
 	}
 	if err := os.MkdirAll(cleaned, 0o755); err != nil {
-		log.TLogln("resolveDownloadBasePath: mkdir failed", cleaned, err)
+		log.TLogln("resolveDataPath: mkdir failed", cleaned, err)
 		return "", false
 	}
 	testFile := filepath.Join(cleaned, ".torrserver-write-test")
 	if err := os.WriteFile(testFile, []byte("ok"), 0o644); err != nil {
-		log.TLogln("resolveDownloadBasePath: write test failed", cleaned, err)
+		log.TLogln("resolveDataPath: write test failed", cleaned, err)
 		return "", false
 	}
 	_ = os.Remove(testFile)
 	return cleaned, true
+}
+
+func ensureDataDirectories(sets *BTSets) {
+	if sets == nil {
+		return
+	}
+	ensure := func(path string) {
+		cleaned := strings.TrimSpace(path)
+		if cleaned == "" {
+			return
+		}
+		if err := os.MkdirAll(cleaned, 0o755); err != nil {
+			log.TLogln("ensure data dir", cleaned, err)
+		}
+	}
+	ensure(sets.DataPath)
+	ensure(sets.DownloadPath)
+	ensure(sets.StreamPath)
+	for _, category := range CategoryFolders() {
+		if sets.DownloadPath != "" {
+			ensure(filepath.Join(sets.DownloadPath, category))
+		}
+		if sets.StreamPath != "" {
+			ensure(filepath.Join(sets.StreamPath, category))
+		}
+	}
 }

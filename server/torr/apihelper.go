@@ -78,6 +78,7 @@ func AddTorrent(spec *torrent.TorrentSpec, title, poster string, data string, ca
 		}
 	}
 
+	syncLibraryStrm(torr)
 	return torr, nil
 }
 
@@ -88,6 +89,9 @@ func SaveTorrentToDB(torr *Torrent) {
 
 func GetTorrent(hashHex string) *Torrent {
 	hash := metainfo.NewHashFromHex(hashHex)
+	if bts == nil {
+		return GetTorrentDB(hash)
+	}
 	timeout := time.Second * time.Duration(sets.BTsets.TorrentDisconnectTimeout)
 	if timeout > time.Minute {
 		timeout = time.Minute
@@ -102,6 +106,9 @@ func GetTorrent(hashHex string) *Torrent {
 	if tr != nil {
 		tor = tr
 		go func() {
+			if bts == nil {
+				return
+			}
 			log.TLogln("New torrent", tor.Hash())
 			tr, _ := NewTorrent(tor.TorrentSpec, bts)
 			if tr != nil {
@@ -152,6 +159,10 @@ func SetTorrent(hashHex, title, poster, category string, data string) *Torrent {
 		}
 		AddTorrentDB(torrDb)
 	}
+	if torr == nil {
+		torr = torrDb
+	}
+	syncLibraryStrm(torr)
 	if torr != nil {
 		return torr
 	} else {
@@ -166,6 +177,7 @@ func RemTorrent(hashHex string, deleteFiles bool) {
 	}
 	hash := metainfo.NewHashFromHex(hashHex)
 	RemoveDownloadJobsByHash(hashHex, deleteFiles)
+	removeLibraryStrm(hashHex)
 	if bts.RemoveTorrent(hash) {
 		if sets.BTsets.UseDisk && hashHex != "" && hashHex != "/" {
 			name := filepath.Join(sets.BTsets.TorrentsSavePath, hashHex)
@@ -220,6 +232,7 @@ func SetSettings(set *sets.BTSets) {
 	}
 	sets.SetBTSets(set)
 	UpdateDownloadSettings()
+	RestoreLibraryStrm()
 	log.TLogln("drop all torrents")
 	dropAllTorrent()
 	time.Sleep(time.Second * 1)
@@ -238,6 +251,7 @@ func SetDefSettings() {
 	}
 	sets.SetDefaultConfig()
 	UpdateDownloadSettings()
+	RestoreLibraryStrm()
 	log.TLogln("drop all torrents")
 	dropAllTorrent()
 	time.Sleep(time.Second * 1)

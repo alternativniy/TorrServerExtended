@@ -37,3 +37,4 @@ toolchains/
 /server/web/pages/template/pages/msx
 /server/config.db
 /server/settings.json
+/server/data

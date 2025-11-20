@@ -62,6 +62,7 @@ FROM alpine
 
 ENV TS_CONF_PATH="/opt/ts/config"
 ENV TS_LOG_PATH="/opt/ts/log"
+ENV TS_DATA_PATH="/opt/ts/data"
 ENV TS_TORR_DIR="/opt/ts/torrents"
 ENV TS_PORT=8090
 ENV GODEBUG=madvdontneed=1

@@ -18,6 +18,7 @@ import (
 	"server/log"
 	"server/settings"
 	"server/torr/state"
+	"server/torr/strm"
 )
 
 type DownloadStatus string
@@ -35,9 +36,11 @@ type DownloadJob struct {
 	ID             string
 	Hash           string
 	Title          string
+	Category       string
 	TargetPath     string
 	Files          []int
 	OutputPaths    []string
+	FileMetas      []settings.DownloadFileMeta
 	BytesTotal     int64
 	BytesCompleted int64
 	Status         DownloadStatus
@@ -88,9 +91,11 @@ func (m *downloadManager) restoreJobs() {
 			ID:             rec.ID,
 			Hash:           strings.ToLower(rec.Hash),
 			Title:          rec.Title,
+			Category:       rec.Category,
 			TargetPath:     rec.TargetPath,
 			Files:          append([]int(nil), rec.Files...),
 			OutputPaths:    append([]string(nil), rec.OutputPaths...),
+			FileMetas:      append([]settings.DownloadFileMeta(nil), rec.FileMetas...),
 			BytesTotal:     rec.BytesTotal,
 			BytesCompleted: rec.BytesCompleted,
 			Status:         DownloadStatus(status),
@@ -111,6 +116,7 @@ func (m *downloadManager) restoreJobs() {
 		}
 
 		m.jobs[job.ID] = job
+		go m.syncStrm(job)
 		if job.Status == DownloadStatusPending {
 			go m.tryStart(job)
 		}
@@ -122,9 +128,11 @@ func (m *downloadManager) persist(job *DownloadJob) {
 		ID:             job.ID,
 		Hash:           job.Hash,
 		Title:          job.Title,
+		Category:       job.Category,
 		TargetPath:     job.TargetPath,
 		Files:          append([]int(nil), job.Files...),
 		OutputPaths:    append([]string(nil), job.OutputPaths...),
+		FileMetas:      append([]settings.DownloadFileMeta(nil), job.FileMetas...),
 		BytesTotal:     job.BytesTotal,
 		BytesCompleted: job.BytesCompleted,
 		Status:         string(job.Status),
@@ -181,6 +189,8 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 		m.persist(job)
 		m.mu.Unlock()
 
+		m.handleStrmOnStart(job)
+
 		err := m.executeJob(ctx, job)
 
 		m.mu.Lock()
@@ -190,6 +200,7 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 		m.active--
 		m.slotCond.Broadcast()
 
+		completed := false
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				if job.isPauseRequested() {
@@ -202,10 +213,14 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 			}
 		} else {
 			job.updateStatus(DownloadStatusDone, "")
+			completed = true
 		}
 		job.clearPauseRequest()
 		m.persist(job)
 		m.mu.Unlock()
+		if completed {
+			go m.syncStrm(job)
+		}
 		return
 	}
 }
@@ -243,6 +258,8 @@ func (m *downloadManager) executeJob(ctx context.Context, job *DownloadJob) erro
 	if len(files) == 0 {
 		return errors.New("no files selected for download")
 	}
+	restorePriority := m.boostPiecePriorities(torr, files)
+	defer restorePriority()
 
 	root := job.TargetPath
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -349,6 +366,57 @@ func (m *downloadManager) downloadFile(ctx context.Context, tor *Torrent, st *st
 
 	return nil
 }
+
+func (m *downloadManager) boostPiecePriorities(tor *Torrent, files []*state.TorrentFileStat) func() {
+	if tor == nil || tor.Torrent == nil || tor.Torrent.Info() == nil || len(files) == 0 {
+		return func() {}
+	}
+	btTorrent := tor.Torrent
+	pieceLen := btTorrent.Info().PieceLength
+	if pieceLen <= 0 {
+		return func() {}
+	}
+	type pieceRange struct{ begin, end int }
+	ranges := make([]pieceRange, 0, len(files))
+	for _, st := range files {
+		file := tor.findFileIndex(st.Id)
+		if file == nil {
+			continue
+		}
+		start := int(file.Offset() / pieceLen)
+		end := int((file.Offset() + file.Length() + pieceLen - 1) / pieceLen)
+		if start < 0 {
+			start = 0
+		}
+		if end <= start {
+			continue
+		}
+		ranges = append(ranges, pieceRange{begin: start, end: end})
+	}
+	if len(ranges) == 0 {
+		return func() {}
+	}
+	for _, rng := range ranges {
+		min := rng.begin
+		max := rng.end
+		btTorrent.DownloadPieces(min, max)
+		for i := min; i < max; i++ {
+			if piece := btTorrent.Piece(i); piece != nil {
+				piece.SetPriority(torrent.PiecePriorityHigh)
+			}
+		}
+	}
+	return func() {
+		if btTorrent == nil {
+			return
+		}
+		for _, rng := range ranges {
+			min := rng.begin
+			max := rng.end
+			btTorrent.CancelPieces(min, max)
+		}
+	}
+}
 func (m *downloadManager) cancelJob(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -372,17 +440,46 @@ func (m *downloadManager) removeJob(id string, deleteFiles bool) bool {
 		m.mu.Unlock()
 		return false
 	}
+	sets := settings.BTsets
+	restoreJobStrm := sets != nil && sets.ForceGenerateStrmFiles
+	restoreLibraryStrm := sets != nil && (sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles)
+	var metaWithFiles *strm.JobMeta
+	if restoreJobStrm {
+		if m.ensureFileMetas(job) {
+			metaWithFiles = buildStrmMeta(job, true)
+		} else {
+			restoreJobStrm = false
+		}
+	}
+	meta := metaWithFiles
+	if meta == nil {
+		meta = buildStrmMeta(job, false)
+	}
+	hash := strings.TrimSpace(job.Hash)
 	if job.Status != DownloadStatusDone && job.Status != DownloadStatusFailed && job.Status != DownloadStatusCanceled {
 		job.updateStatus(DownloadStatusCanceled, "")
 		m.persist(job)
 	}
 	delete(m.jobs, id)
 	m.mu.Unlock()
+	if meta != nil {
+		strm.RemoveJob(meta)
+	}
+	if restoreJobStrm && metaWithFiles != nil {
+		go strm.SyncJob(metaWithFiles)
+	}
 
 	if deleteFiles && job != nil {
 		if err := job.cleanupTargetPath(); err != nil {
 			log.TLogln("download cleanup failed", err)
 		}
+	}
+	if restoreLibraryStrm && hash != "" {
+		go func(h string) {
+			if tor := findTorrentByHash(h); tor != nil {
+				syncLibraryStrm(tor)
+			}
+		}(hash)
 	}
 	settings.RemoveDownloadJob(id)
 	return true
@@ -597,9 +694,11 @@ func (job *DownloadJob) clone() *DownloadJob {
 		ID:             job.ID,
 		Hash:           job.Hash,
 		Title:          job.Title,
+		Category:       job.Category,
 		TargetPath:     job.TargetPath,
 		Files:          append([]int(nil), job.Files...),
 		OutputPaths:    append([]string(nil), job.OutputPaths...),
+		FileMetas:      append([]settings.DownloadFileMeta(nil), job.FileMetas...),
 		BytesTotal:     job.BytesTotal,
 		BytesCompleted: job.BytesCompleted,
 		Status:         job.Status,
@@ -647,9 +746,21 @@ func (job *DownloadJob) cleanupTargetPath() error {
 func (job *DownloadJob) recordedOutputPaths() []string {
 	job.mu.Lock()
 	paths := append([]string(nil), job.OutputPaths...)
+	metas := append([]settings.DownloadFileMeta(nil), job.FileMetas...)
 	job.mu.Unlock()
 	if len(paths) > 0 {
 		return paths
+	}
+	if len(metas) > 0 {
+		derived := make([]string, 0, len(metas))
+		for _, meta := range metas {
+			if meta.Path != "" {
+				derived = append(derived, meta.Path)
+			}
+		}
+		if len(derived) > 0 {
+			return derived
+		}
 	}
 	tor := GetTorrent(job.Hash)
 	if tor == nil {
@@ -681,14 +792,16 @@ func cleanupEmptyParents(current, base string) {
 	}
 }
 
-func newDownloadJob(hash, title, target string, files []int, outputs []string) *DownloadJob {
+func newDownloadJob(hash, title, category, target string, files []int, outputs []string, metas []settings.DownloadFileMeta) *DownloadJob {
 	return &DownloadJob{
 		ID:          uuid.NewString(),
 		Hash:        strings.ToLower(hash),
 		Title:       title,
+		Category:    category,
 		TargetPath:  target,
 		Files:       append([]int(nil), files...),
 		OutputPaths: append([]string(nil), outputs...),
+		FileMetas:   append([]settings.DownloadFileMeta(nil), metas...),
 		Status:      DownloadStatusPending,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -743,10 +856,12 @@ func enqueueDownloadJob(tor *Torrent, preferredTitle, targetPath string, files [
 	}
 
 	outputs := collectOutputPathsFromTorrent(tor, files)
-	job := newDownloadJob(hash, title, resolvedPath, files, outputs)
+	fileMetas := collectFileMetasFromTorrent(tor, files)
+	job := newDownloadJob(hash, title, tor.Category, resolvedPath, files, outputs, fileMetas)
 
 	manager := getDownloadManager()
 	manager.enqueue(job)
+	go manager.syncStrm(job)
 	return job.clone(), nil
 }
 
@@ -797,25 +912,85 @@ func categoryFolderName(tor *Torrent) string {
 	if tor != nil {
 		category = tor.Category
 	}
-	return mapCategoryToFolder(category)
+	return settings.CategoryFolder(category)
 }
 
-func mapCategoryToFolder(category string) string {
-	cat := strings.ToLower(strings.TrimSpace(category))
-	switch cat {
-	case "", "none", "uncategorized", "без категории", "uncategory":
-		return "uncategorized"
-	case "movie", "movies", "film", "films", "фильм", "фильмы":
-		return "movie"
-	case "series", "tv", "tvshow", "serial", "сериал", "сериалы":
-		return "series"
-	case "music", "музыка":
-		return "music"
-	case "other", "misc", "разное":
-		return "other"
-	default:
-		return "other"
+func (m *downloadManager) handleStrmOnStart(job *DownloadJob) {
+	sets := settings.BTsets
+	if sets == nil {
+		return
 	}
+	if !(sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles) {
+		return
+	}
+	if sets.ForceGenerateStrmFiles {
+		if meta := m.buildStrmMetaForSelectedFiles(job); meta != nil {
+			go strm.SyncJob(meta)
+		}
+		return
+	}
+	if meta := m.buildStrmMetaForSelectedFiles(job); meta != nil {
+		go strm.RemoveJob(meta)
+	}
+	if hash := strings.TrimSpace(job.Hash); hash != "" {
+		go removeLibraryStrm(hash)
+	}
+}
+
+func (m *downloadManager) buildStrmMetaForSelectedFiles(job *DownloadJob) *strm.JobMeta {
+	if job == nil {
+		return nil
+	}
+	hash := strings.TrimSpace(job.Hash)
+	if hash == "" {
+		return nil
+	}
+	tor := GetTorrent(hash)
+	if tor == nil {
+		tor = findTorrentByHash(hash)
+	}
+	if tor == nil {
+		return nil
+	}
+	stats := libraryFileStats(tor)
+	if len(stats) == 0 {
+		return nil
+	}
+	selected := make(map[int]struct{})
+	job.mu.Lock()
+	files := append([]int(nil), job.Files...)
+	job.mu.Unlock()
+	for _, id := range files {
+		selected[id] = struct{}{}
+	}
+	includeAll := len(selected) == 0
+	meta := &strm.JobMeta{
+		JobID:      job.ID,
+		Hash:       hash,
+		Title:      job.Title,
+		Category:   job.Category,
+		TargetPath: defaultLibraryTargetPath(tor),
+		FlatLayout: true,
+	}
+	for _, st := range stats {
+		if st == nil || st.Id <= 0 {
+			continue
+		}
+		if !includeAll {
+			if _, ok := selected[st.Id]; !ok {
+				continue
+			}
+		}
+		path := strings.TrimSpace(st.Path)
+		if path == "" {
+			continue
+		}
+		meta.Files = append(meta.Files, strm.FileMeta{ID: st.Id, Path: path, Length: st.Length})
+	}
+	if len(meta.Files) == 0 {
+		return nil
+	}
+	return meta
 }
 
 func collectOutputPathsFromTorrent(tor *Torrent, selected []int) []string {
@@ -844,6 +1019,208 @@ func collectOutputPathsFromTorrent(tor *Torrent, selected []int) []string {
 		paths = append(paths, st.Path)
 	}
 	return paths
+}
+
+func collectFileMetasFromTorrent(tor *Torrent, selected []int) []settings.DownloadFileMeta {
+	if tor == nil {
+		return nil
+	}
+	status := tor.Status()
+	if status == nil || len(status.FileStats) == 0 {
+		return nil
+	}
+	includeAll := len(selected) == 0
+	var idFilter map[int]struct{}
+	if !includeAll {
+		idFilter = make(map[int]struct{}, len(selected))
+		for _, id := range selected {
+			idFilter[id] = struct{}{}
+		}
+	}
+	metas := make([]settings.DownloadFileMeta, 0, len(status.FileStats))
+	for _, st := range status.FileStats {
+		if !includeAll {
+			if _, ok := idFilter[st.Id]; !ok {
+				continue
+			}
+		}
+		metas = append(metas, settings.DownloadFileMeta{
+			ID:     st.Id,
+			Path:   st.Path,
+			Length: st.Length,
+		})
+	}
+	return metas
+}
+
+func (m *downloadManager) syncStrm(job *DownloadJob) {
+	if job == nil {
+		return
+	}
+	sets := settings.BTsets
+	if sets == nil {
+		return
+	}
+	if !(sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles) {
+		return
+	}
+	if !m.ensureFileMetas(job) {
+		return
+	}
+	files := m.filterFilesWithoutOtherJobs(job)
+	if len(files) == 0 {
+		return
+	}
+	meta := buildStrmMetaWithFiles(job, files)
+	if meta == nil {
+		return
+	}
+	strm.SyncJob(meta)
+	if tor := GetTorrent(job.Hash); tor != nil {
+		go syncLibraryStrm(tor)
+	}
+}
+
+func (m *downloadManager) ensureFileMetas(job *DownloadJob) bool {
+	job.mu.Lock()
+	has := len(job.FileMetas) > 0
+	job.mu.Unlock()
+	if has {
+		return true
+	}
+	tor := GetTorrent(job.Hash)
+	if tor == nil {
+		return false
+	}
+	if tor.Torrent == nil {
+		if loaded := LoadTorrent(tor); loaded != nil {
+			tor = loaded
+		}
+	}
+	if !tor.GotInfo() {
+		return false
+	}
+	metas := collectFileMetasFromTorrent(tor, job.Files)
+	if len(metas) == 0 {
+		return false
+	}
+	job.mu.Lock()
+	job.FileMetas = append([]settings.DownloadFileMeta(nil), metas...)
+	if job.Category == "" {
+		job.Category = tor.Category
+	}
+	job.mu.Unlock()
+	m.persist(job)
+	return true
+}
+
+func (m *downloadManager) filterFilesWithoutOtherJobs(job *DownloadJob) []settings.DownloadFileMeta {
+	job.mu.Lock()
+	metas := append([]settings.DownloadFileMeta(nil), job.FileMetas...)
+	job.mu.Unlock()
+	if len(metas) == 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	busy := make(map[int]struct{})
+	for id, other := range m.jobs {
+		if id == job.ID {
+			continue
+		}
+		if other.Hash != job.Hash {
+			continue
+		}
+		other.mu.Lock()
+		files := append([]int(nil), other.Files...)
+		other.mu.Unlock()
+		if len(files) == 0 {
+			busy[-1] = struct{}{}
+			continue
+		}
+		for _, fid := range files {
+			busy[fid] = struct{}{}
+		}
+	}
+	res := make([]settings.DownloadFileMeta, 0, len(metas))
+	for _, fm := range metas {
+		if _, allBusy := busy[-1]; allBusy {
+			continue
+		}
+		if _, used := busy[fm.ID]; used {
+			continue
+		}
+		res = append(res, fm)
+	}
+	return res
+}
+
+func buildStrmMeta(job *DownloadJob, includeFiles bool) *strm.JobMeta {
+	if job == nil {
+		return nil
+	}
+	meta := &strm.JobMeta{
+		JobID:      job.ID,
+		Hash:       job.Hash,
+		Title:      job.Title,
+		Category:   job.Category,
+		TargetPath: job.TargetPath,
+		FlatLayout: true,
+	}
+	if !includeFiles {
+		return meta
+	}
+	job.mu.Lock()
+	files := append([]settings.DownloadFileMeta(nil), job.FileMetas...)
+	job.mu.Unlock()
+	if len(files) == 0 {
+		return nil
+	}
+	meta.Files = make([]strm.FileMeta, 0, len(files))
+	for _, f := range files {
+		if f.ID <= 0 {
+			continue
+		}
+		path := strings.TrimSpace(f.Path)
+		if path == "" {
+			continue
+		}
+		meta.Files = append(meta.Files, strm.FileMeta{ID: f.ID, Path: path, Length: f.Length})
+	}
+	if len(meta.Files) == 0 {
+		return nil
+	}
+	return meta
+}
+
+func buildStrmMetaWithFiles(job *DownloadJob, files []settings.DownloadFileMeta) *strm.JobMeta {
+	if job == nil || len(files) == 0 {
+		return nil
+	}
+	meta := &strm.JobMeta{
+		JobID:      job.ID,
+		Hash:       job.Hash,
+		Title:      job.Title,
+		Category:   job.Category,
+		TargetPath: job.TargetPath,
+		FlatLayout: true,
+	}
+	meta.Files = make([]strm.FileMeta, 0, len(files))
+	for _, f := range files {
+		if f.ID <= 0 {
+			continue
+		}
+		path := strings.TrimSpace(f.Path)
+		if path == "" {
+			continue
+		}
+		meta.Files = append(meta.Files, strm.FileMeta{ID: f.ID, Path: path, Length: f.Length})
+	}
+	if len(meta.Files) == 0 {
+		return nil
+	}
+	return meta
 }
 
 func ListDownloadJobs() []*DownloadJob {
