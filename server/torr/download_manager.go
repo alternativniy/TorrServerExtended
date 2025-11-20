@@ -80,6 +80,14 @@ func getDownloadManager() *downloadManager {
 	return dlManager
 }
 
+func isMetadataError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "failed to retrieve torrent metadata")
+}
+
 // withJobLock captures a snapshot of a job under its mutex and applies fn to it
 // without holding the mutex during fn execution. This helps to avoid keeping
 // locks while doing I/O or calling into other packages.
@@ -208,7 +216,22 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 
 	m.handleStrmOnStart(job)
 
-	err := m.executeJob(ctx, job)
+	var err error
+	const (
+		maxMetaRetries = 3
+		metaRetryDelay = 5 * time.Second
+	)
+	for attempt := 0; attempt < maxMetaRetries; attempt++ {
+		err = m.executeJob(ctx, job)
+		if err == nil || !isMetadataError(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(metaRetryDelay):
+		}
+	}
 
 	// Clear cancel and update status based on result.
 	var completed bool
@@ -257,7 +280,21 @@ func (m *downloadManager) executeJob(ctx context.Context, job *DownloadJob) erro
 	}
 
 	if !torr.GotInfo() {
-		return errors.New("failed to retrieve torrent metadata")
+		const (
+			metaWaitStep = time.Second
+			metaWaitMax  = 30 * time.Second
+		)
+		waited := time.Duration(0)
+		for !torr.GotInfo() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if waited >= metaWaitMax {
+				return errors.New("failed to retrieve torrent metadata: timeout")
+			}
+			time.Sleep(metaWaitStep)
+			waited += metaWaitStep
+		}
 	}
 
 	if job.BytesTotal == 0 {

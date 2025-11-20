@@ -55,6 +55,10 @@ services:
       - TS_HTTPAUTH=0               # set to 1 to enable basic auth
       - TS_CONF_PATH=/opt/ts/config # config & db
       - TS_TORR_DIR=/opt/ts/torrents
+      - TS_GEN_STRM_FILES=true      # enable STRM generation
+      - TS_FORCE_GEN_STRM_FILES=false
+      # uncomment if you need a fixed public base URL for STRM
+      # - TS_STRM_HTTP_BASE=https://media.example.com
     volumes:
       - ./data:/opt/ts              # persistent data, config, downloads, stream, torrents
     restart: unless-stopped
@@ -102,10 +106,13 @@ Most configuration can be done via environment variables (recommended for Docker
 | `TS_HTTPAUTH`   | `0`                          | `1` to enable basic HTTP auth using `accs.db`. |
 | `TS_RDB`        | `0`                          | `1` to start in read‑only DB mode. |
 | `TS_DONTKILL`   | `0`                          | `1` to ignore shutdown signals (useful with some supervisors). |
-| `TS_CONF_PATH`  | `/opt/ts/config`             | Path where config and DB are stored. |
-| `TS_DATA_PATH`  | `/opt/ts/data` (effective)   | Root of internal data (downloads/stream). Auto‑resolved if not set. |
-| `TS_TORR_DIR`   | `/opt/ts/torrents`           | Root for watched torrents directory (blackhole). Can be pointed elsewhere. |
-| `TS_LOG_PATH`   | `/opt/ts/log` or inside data | Custom log file location. |
+| `TS_CONF_PATH`          | `/opt/ts/config`             | Path where config and DB are stored. |
+| `TS_DATA_PATH`          | `/opt/ts/data` (effective)   | Root of internal data (downloads/stream). Auto‑resolved if not set. |
+| `TS_TORR_DIR`           | `/opt/ts/torrents`           | Root for watched torrents directory (blackhole). Can be pointed elsewhere. |
+| `TS_LOG_PATH`           | `/opt/ts/log` or inside data | Custom log file location. |
+| `TS_STRM_HTTP_BASE`     | _empty_                      | Optional absolute base URL for generated STRM links (e.g. `https://media.example.com`). If empty, TorrServer builds URLs from bound IP/port. |
+| `TS_GEN_STRM_FILES`     | `true` (when migrated)       | Enable automatic STRM file generation for torrents. Can be overridden via env. |
+| `TS_FORCE_GEN_STRM_FILES` | `false`                    | When `true`, always regenerate STRM files even if they already exist. |
 
 Other flags are available as CLI arguments as well (see “Server Arguments” below).
 
