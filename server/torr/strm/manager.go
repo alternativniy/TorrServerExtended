@@ -45,12 +45,25 @@ func getManager() *Manager {
 
 type Manager struct{}
 
+// cloneMeta creates a deep copy of JobMeta to avoid accidental mutations
+// by callers while a sync or remove operation is in progress.
+func cloneMeta(meta *JobMeta) *JobMeta {
+	if meta == nil {
+		return nil
+	}
+	copyMeta := *meta
+	if len(meta.Files) > 0 {
+		copyMeta.Files = append([]FileMeta(nil), meta.Files...)
+	}
+	return &copyMeta
+}
+
 func SyncJob(meta *JobMeta) {
-	getManager().sync(meta)
+	getManager().sync(cloneMeta(meta))
 }
 
 func RemoveJob(meta *JobMeta) {
-	getManager().remove(meta)
+	getManager().remove(cloneMeta(meta))
 }
 
 func (m *Manager) sync(meta *JobMeta) {

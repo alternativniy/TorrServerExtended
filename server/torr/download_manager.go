@@ -80,6 +80,19 @@ func getDownloadManager() *downloadManager {
 	return dlManager
 }
 
+// withJobLock captures a snapshot of a job under its mutex and applies fn to it
+// without holding the mutex during fn execution. This helps to avoid keeping
+// locks while doing I/O or calling into other packages.
+func withJobLock[T any](job *DownloadJob, fn func(*DownloadJob) T) T {
+	if job == nil {
+		var zero T
+		return zero
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	return fn(job)
+}
+
 func (m *downloadManager) restoreJobs() {
 	records := settings.ListDownloadJobs()
 	for _, rec := range records {
@@ -162,66 +175,71 @@ func (m *downloadManager) enqueue(job *DownloadJob) {
 }
 
 func (m *downloadManager) tryStart(job *DownloadJob) {
-	for {
+	// Acquire a slot respecting maxParallel limit.
+	m.mu.Lock()
+	for m.active >= m.maxParallel {
+		m.slotCond.Wait()
+	}
+	m.active++
+	m.mu.Unlock()
+
+	defer func() {
 		m.mu.Lock()
-		if job.Status == DownloadStatusCanceled || job.Status == DownloadStatusDone || job.Status == DownloadStatusPaused {
-			m.mu.Unlock()
-			return
-		}
-
-		if m.active >= m.maxParallel {
-			if job.Status != DownloadStatusPending {
-				job.updateStatus(DownloadStatusPending, "")
-				m.persist(job)
-			}
-			m.slotCond.Wait()
-			m.mu.Unlock()
-			continue
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		job.mu.Lock()
-		job.cancel = cancel
-		job.mu.Unlock()
-
-		m.active++
-		job.updateStatus(DownloadStatusRunning, "")
-		m.persist(job)
-		m.mu.Unlock()
-
-		m.handleStrmOnStart(job)
-
-		err := m.executeJob(ctx, job)
-
-		m.mu.Lock()
-		job.mu.Lock()
-		job.cancel = nil
-		job.mu.Unlock()
 		m.active--
 		m.slotCond.Broadcast()
+		m.mu.Unlock()
+	}()
 
-		completed := false
+	// Check terminal states under job lock.
+	st := withJobLock(job, func(j *DownloadJob) DownloadStatus { return j.Status })
+	if st == DownloadStatusCanceled || st == DownloadStatusDone || st == DownloadStatusPaused {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.cancel = cancel
+		j.Status = DownloadStatusRunning
+		j.Error = ""
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
+	m.persist(job)
+
+	m.handleStrmOnStart(job)
+
+	err := m.executeJob(ctx, job)
+
+	// Clear cancel and update status based on result.
+	var completed bool
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.cancel = nil
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				if job.isPauseRequested() {
-					job.updateStatus(DownloadStatusPaused, "")
-				} else if job.Status != DownloadStatusCanceled {
-					job.updateStatus(DownloadStatusCanceled, "")
+				if j.pauseRequested {
+					j.Status = DownloadStatusPaused
+					j.Error = ""
+				} else if j.Status != DownloadStatusCanceled {
+					j.Status = DownloadStatusCanceled
+					j.Error = ""
 				}
 			} else {
-				job.updateStatus(DownloadStatusFailed, err.Error())
+				j.Status = DownloadStatusFailed
+				j.Error = err.Error()
 			}
 		} else {
-			job.updateStatus(DownloadStatusDone, "")
+			j.Status = DownloadStatusDone
+			j.Error = ""
 			completed = true
 		}
-		job.clearPauseRequest()
-		m.persist(job)
-		m.mu.Unlock()
-		if completed {
-			go m.syncStrm(job)
-		}
-		return
+		j.pauseRequested = false
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
+	m.persist(job)
+
+	if completed {
+		go m.syncStrm(job)
 	}
 }
 
@@ -419,16 +437,25 @@ func (m *downloadManager) boostPiecePriorities(tor *Torrent, files []*state.Torr
 }
 func (m *downloadManager) cancelJob(id string) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	job, ok := m.jobs[id]
 	if !ok {
+		m.mu.Unlock()
 		return false
 	}
-	if job.cancel != nil {
-		job.cancel()
+	// make local copy of cancel to avoid holding manager lock during cancel
+	var cancel context.CancelFunc
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		cancel = j.cancel
+		j.pauseRequested = false
+		j.Status = DownloadStatusCanceled
+		j.Error = ""
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
-	job.clearPauseRequest()
-	job.updateStatus(DownloadStatusCanceled, "")
 	m.persist(job)
 	return true
 }
@@ -456,12 +483,19 @@ func (m *downloadManager) removeJob(id string, deleteFiles bool) bool {
 		meta = buildStrmMeta(job, false)
 	}
 	hash := strings.TrimSpace(job.Hash)
-	if job.Status != DownloadStatusDone && job.Status != DownloadStatusFailed && job.Status != DownloadStatusCanceled {
-		job.updateStatus(DownloadStatusCanceled, "")
-		m.persist(job)
-	}
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		if j.Status != DownloadStatusDone && j.Status != DownloadStatusFailed && j.Status != DownloadStatusCanceled {
+			j.Status = DownloadStatusCanceled
+			j.Error = ""
+			j.pauseRequested = false
+			j.UpdatedAt = time.Now()
+		}
+		return struct{}{}
+	})
 	delete(m.jobs, id)
 	m.mu.Unlock()
+
+	m.persist(job)
 	if meta != nil {
 		strm.RemoveJob(meta)
 	}
@@ -492,24 +526,41 @@ func (m *downloadManager) pauseJob(id string) bool {
 		m.mu.Unlock()
 		return false
 	}
-	switch job.Status {
+	status := withJobLock(job, func(j *DownloadJob) DownloadStatus { return j.Status })
+	switch status {
 	case DownloadStatusDone, DownloadStatusFailed, DownloadStatusCanceled:
 		m.mu.Unlock()
 		return false
 	case DownloadStatusPaused:
 		m.mu.Unlock()
 		return true
-	case DownloadStatusPending:
-		job.updateStatus(DownloadStatusPaused, "")
+	}
+
+	if status == DownloadStatusPending {
+		withJobLock(job, func(j *DownloadJob) struct{} {
+			j.Status = DownloadStatusPaused
+			j.Error = ""
+			j.pauseRequested = false
+			j.UpdatedAt = time.Now()
+			return struct{}{}
+		})
+		m.mu.Unlock()
 		m.persist(job)
+		m.mu.Lock()
 		m.slotCond.Broadcast()
 		m.mu.Unlock()
 		return true
 	}
-	job.requestPause()
-	m.persist(job)
-	cancel := job.cancel
+
+	var cancel context.CancelFunc
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.pauseRequested = true
+		j.UpdatedAt = time.Now()
+		cancel = j.cancel
+		return struct{}{}
+	})
 	m.mu.Unlock()
+	m.persist(job)
 	if cancel != nil {
 		cancel()
 	}
@@ -523,14 +574,21 @@ func (m *downloadManager) resumeJob(id string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("job %s not found", id)
 	}
-	if job.Status != DownloadStatusPaused {
-		m.mu.Unlock()
+	isPaused := withJobLock(job, func(j *DownloadJob) bool {
+		if j.Status != DownloadStatusPaused {
+			return false
+		}
+		j.pauseRequested = false
+		j.Status = DownloadStatusPending
+		j.Error = ""
+		j.UpdatedAt = time.Now()
+		return true
+	})
+	m.mu.Unlock()
+	if !isPaused {
 		return fmt.Errorf("job %s is not paused", id)
 	}
-	job.clearPauseRequest()
-	job.updateStatus(DownloadStatusPending, "")
 	m.persist(job)
-	m.mu.Unlock()
 	go m.tryStart(job)
 	return nil
 }
@@ -581,24 +639,25 @@ func (m *downloadManager) getJob(id string) *DownloadJob {
 }
 
 func (job *DownloadJob) updateStatus(status DownloadStatus, errMsg string) {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	job.Status = status
-	job.Error = errMsg
-	job.UpdatedAt = time.Now()
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.Status = status
+		j.Error = errMsg
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
 }
 
 func (job *DownloadJob) addProgress(n int64) bool {
-	job.mu.Lock()
-	job.BytesCompleted += n
-	now := time.Now()
-	persist := now.Sub(job.persistThrottle) > time.Second || job.BytesCompleted >= job.BytesTotal
-	if persist {
-		job.persistThrottle = now
-	}
-	job.UpdatedAt = now
-	job.mu.Unlock()
-	return persist
+	return withJobLock(job, func(j *DownloadJob) bool {
+		j.BytesCompleted += n
+		now := time.Now()
+		persist := now.Sub(j.persistThrottle) > time.Second || (j.BytesTotal > 0 && j.BytesCompleted >= j.BytesTotal)
+		if persist {
+			j.persistThrottle = now
+		}
+		j.UpdatedAt = now
+		return persist
+	})
 }
 
 func (job *DownloadJob) calculateTotalSize(tor *Torrent) (int64, error) {
@@ -642,12 +701,13 @@ func (job *DownloadJob) scanDiskProgress(files []*state.TorrentFileStat, root st
 		progress[st.Id] = completed
 		total += completed
 	}
-	job.mu.Lock()
-	if total > job.BytesCompleted {
-		job.BytesCompleted = total
-		job.UpdatedAt = time.Now()
-	}
-	job.mu.Unlock()
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		if total > j.BytesCompleted {
+			j.BytesCompleted = total
+			j.UpdatedAt = time.Now()
+		}
+		return struct{}{}
+	})
 	return progress
 }
 
@@ -670,43 +730,50 @@ func (job *DownloadJob) fileProgress(root string, st *state.TorrentFileStat) int
 }
 
 func (job *DownloadJob) requestPause() {
-	job.mu.Lock()
-	job.pauseRequested = true
-	job.mu.Unlock()
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.pauseRequested = true
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
 }
 
 func (job *DownloadJob) clearPauseRequest() {
-	job.mu.Lock()
-	job.pauseRequested = false
-	job.mu.Unlock()
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.pauseRequested = false
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
 }
 
 func (job *DownloadJob) isPauseRequested() bool {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	return job.pauseRequested
+	return withJobLock(job, func(j *DownloadJob) bool {
+		return j.pauseRequested
+	})
 }
 
 func (job *DownloadJob) clone() *DownloadJob {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	copyJob := &DownloadJob{
-		ID:             job.ID,
-		Hash:           job.Hash,
-		Title:          job.Title,
-		Category:       job.Category,
-		TargetPath:     job.TargetPath,
-		Files:          append([]int(nil), job.Files...),
-		OutputPaths:    append([]string(nil), job.OutputPaths...),
-		FileMetas:      append([]settings.DownloadFileMeta(nil), job.FileMetas...),
-		BytesTotal:     job.BytesTotal,
-		BytesCompleted: job.BytesCompleted,
-		Status:         job.Status,
-		Error:          job.Error,
-		CreatedAt:      job.CreatedAt,
-		UpdatedAt:      job.UpdatedAt,
-	}
-	return copyJob
+	return withJobLock(job, func(j *DownloadJob) *DownloadJob {
+		if j == nil {
+			return nil
+		}
+		copyJob := &DownloadJob{
+			ID:             j.ID,
+			Hash:           j.Hash,
+			Title:          j.Title,
+			Category:       j.Category,
+			TargetPath:     j.TargetPath,
+			Files:          append([]int(nil), j.Files...),
+			OutputPaths:    append([]string(nil), j.OutputPaths...),
+			FileMetas:      append([]settings.DownloadFileMeta(nil), j.FileMetas...),
+			BytesTotal:     j.BytesTotal,
+			BytesCompleted: j.BytesCompleted,
+			Status:         j.Status,
+			Error:          j.Error,
+			CreatedAt:      j.CreatedAt,
+			UpdatedAt:      j.UpdatedAt,
+		}
+		return copyJob
+	})
 }
 
 func (job *DownloadJob) cleanupTargetPath() error {
@@ -744,10 +811,13 @@ func (job *DownloadJob) cleanupTargetPath() error {
 }
 
 func (job *DownloadJob) recordedOutputPaths() []string {
-	job.mu.Lock()
-	paths := append([]string(nil), job.OutputPaths...)
-	metas := append([]settings.DownloadFileMeta(nil), job.FileMetas...)
-	job.mu.Unlock()
+	var paths []string
+	var metas []settings.DownloadFileMeta
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		paths = append([]string(nil), j.OutputPaths...)
+		metas = append([]settings.DownloadFileMeta(nil), j.FileMetas...)
+		return struct{}{}
+	})
 	if len(paths) > 0 {
 		return paths
 	}
@@ -1082,9 +1152,9 @@ func (m *downloadManager) syncStrm(job *DownloadJob) {
 }
 
 func (m *downloadManager) ensureFileMetas(job *DownloadJob) bool {
-	job.mu.Lock()
-	has := len(job.FileMetas) > 0
-	job.mu.Unlock()
+	has := withJobLock(job, func(j *DownloadJob) bool {
+		return len(j.FileMetas) > 0
+	})
 	if has {
 		return true
 	}
@@ -1104,20 +1174,22 @@ func (m *downloadManager) ensureFileMetas(job *DownloadJob) bool {
 	if len(metas) == 0 {
 		return false
 	}
-	job.mu.Lock()
-	job.FileMetas = append([]settings.DownloadFileMeta(nil), metas...)
-	if job.Category == "" {
-		job.Category = tor.Category
-	}
-	job.mu.Unlock()
+	withJobLock(job, func(j *DownloadJob) struct{} {
+		j.FileMetas = append([]settings.DownloadFileMeta(nil), metas...)
+		if j.Category == "" {
+			j.Category = tor.Category
+		}
+		j.UpdatedAt = time.Now()
+		return struct{}{}
+	})
 	m.persist(job)
 	return true
 }
 
 func (m *downloadManager) filterFilesWithoutOtherJobs(job *DownloadJob) []settings.DownloadFileMeta {
-	job.mu.Lock()
-	metas := append([]settings.DownloadFileMeta(nil), job.FileMetas...)
-	job.mu.Unlock()
+	metas := withJobLock(job, func(j *DownloadJob) []settings.DownloadFileMeta {
+		return append([]settings.DownloadFileMeta(nil), j.FileMetas...)
+	})
 	if len(metas) == 0 {
 		return nil
 	}
@@ -1282,18 +1354,21 @@ func (m *downloadManager) listStatusesByHash(hash string) []*state.TorrentDownlo
 }
 
 func (job *DownloadJob) toTorrentDownloadStatus() *state.TorrentDownloadStatus {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	return &state.TorrentDownloadStatus{
-		ID:             job.ID,
-		Hash:           job.Hash,
-		Title:          job.Title,
-		Status:         string(job.Status),
-		BytesTotal:     job.BytesTotal,
-		BytesCompleted: job.BytesCompleted,
-		TargetPath:     job.TargetPath,
-		Error:          job.Error,
-		CreatedAt:      job.CreatedAt.Unix(),
-		UpdatedAt:      job.UpdatedAt.Unix(),
-	}
+	return withJobLock(job, func(j *DownloadJob) *state.TorrentDownloadStatus {
+		if j == nil {
+			return nil
+		}
+		return &state.TorrentDownloadStatus{
+			ID:             j.ID,
+			Hash:           j.Hash,
+			Title:          j.Title,
+			Status:         string(j.Status),
+			BytesTotal:     j.BytesTotal,
+			BytesCompleted: j.BytesCompleted,
+			TargetPath:     j.TargetPath,
+			Error:          j.Error,
+			CreatedAt:      j.CreatedAt.Unix(),
+			UpdatedAt:      j.UpdatedAt.Unix(),
+		}
+	})
 }
