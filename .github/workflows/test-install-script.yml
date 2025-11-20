@@ -3,14 +3,14 @@ name: Test Install Script
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - "installTorrServerLinux.sh"
       - ".github/workflows/test-install-script.yml"
       - ".github/scripts/test-install-script.sh"
   pull_request:
     branches:
-      - master
+      - main
     paths:
       - "installTorrServerLinux.sh"
       - ".github/workflows/test-install-script.yml"

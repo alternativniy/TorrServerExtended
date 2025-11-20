@@ -3,7 +3,7 @@ name: Release Docker multi arch
 on:
   push:
     branches:
-      - master
+      - main
 
 jobs:
   docker:
