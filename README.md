@@ -3,349 +3,295 @@
 </p>
 
 <p align="center">
-  Simple and powerful tool for streaming torrents.
+  <b>Simple and powerful torrent streaming server.</b>
   <br/>
   <br/>
   <a href="https://github.com/YouROK/TorrServer/blob/master/LICENSE">
     <img alt="GitHub" src="https://img.shields.io/github/license/YouROK/TorrServer"/>
-  </a>
-  <a href="https://goreportcard.com/report/github.com/YouROK/TorrServer">
-    <img src="https://goreportcard.com/badge/github.com/YouROK/TorrServer" />
-  </a>
-  <a href="https://pkg.go.dev/github.com/YouROK/TorrServer">
-    <img src="https://pkg.go.dev/badge/github.com/YouROK/TorrServer.svg" alt="Go Reference"/>
-  </a>
-  <a href="https://github.com/YouROK/TorrServer/issues">
-    <img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat" alt="CodeFactor" />
-  </a>
-  <a href="https://github.com/YouROK/TorrServer/actions/workflows/github-actions-docker.yml" rel="nofollow">
-    <img src="https://img.shields.io/github/actions/workflow/status/YouROK/TorrServer/github-actions-docker.yml?logo=Github" alt="Build" />
   </a>
   <a href="https://github.com/YouROK/TorrServer/tags" rel="nofollow">
     <img alt="GitHub tag (latest SemVer pre-release)" src="https://img.shields.io/github/v/tag/YouROK/TorrServer?include_prereleases&label=version"/>
   </a>
 </p>
 
-## Introduction
+---
 
-TorrServer is a program that allows users to view torrents online without the need for preliminary file downloading.
-The core functionality of TorrServer includes caching torrents and subsequent data transfer via the HTTP protocol,
-allowing the cache size to be adjusted according to the system parameters and the user's internet connection speed.
+# TorrServer Extended 
 
-## AI Documentation
+🔥 **TorrServer Extended** is a self‑hosted torrent streaming server with a modern web UI, simple HTTP API and first‑class Docker support. Point it to a torrent or magnet link and start watching immediately – no pre‑download required.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/YouROK/TorrServer)
+> Recommended deployment: **Docker Compose** (with persistent volumes and well‑structured data layout).
 
-## Features
+---
 
-- Caching
-- Streaming
-- Local and Remote Server
-- Viewing torrents on various devices
-- Integration with other apps through API
-- Cross-browser modern web interface
-- Optional DLNA server
+## ✨ Features
 
-## Getting Started
+- 🎬 **Instant torrent streaming** – play while downloading, no manual pre‑download.
+- 🌐 **Web UI** – manage torrents and playback from any browser.
+- 🧲 **Magnet & .torrent support** – drop `.torrent` or `.magnet` files into a watched folder and they are picked up automatically.
+- 📂 **Blackhole integration** – out‑of‑the‑box directory layout for Sonarr/Radarr‑like apps (`downloads/stream` + categories).
+- 📺 **Smart TV friendly** – works great with Media Station X and other DLNA / HTTP clients.
+- 🔐 **HTTP auth & IP allow/deny lists** – protect access to your server.
+- 🧱 **Persistent data model** – separates config, data, downloads and streaming outputs.
+- 🐳 **Official Docker images** – simple to run, update and back up.
 
-### Installation
+---
 
-Download the application for the required platform in the [releases](https://github.com/YouROK/TorrServer/releases) page. After installation, open the link <http://127.0.0.1:8090> in the browser.
+## 🚀 Quick Start (Docker Compose – Recommended)
 
-#### Windows
+Create a `docker-compose.yml` next to a fresh project directory and adjust paths/ports if needed:
 
-Run `TorrServer-windows-amd64.exe`.
+```yaml
+version: "3.8"
 
-#### Linux
-
-Run in console
-
-```bash
-curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh | sudo bash
-```
-
-The script supports interactive and non-interactive installation, configuration, updates, and removal. When running the script interactively, you can:
-
-- **Install/Update**: Choose to install or update TorrServer
-- **Reconfigure**: If TorrServer is already installed, you'll be prompted to reconfigure settings (port, auth, read-only mode, logging, BBR)
-- **Uninstall**: Type `Delete` (or `Удалить` in Russian) to uninstall TorrServer
-
-**Download first and set execute permissions:**
-
-```bash
-curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerLinux.sh -o installTorrServerLinux.sh && chmod 755 installTorrServerLinux.sh
-```
-
-**Command-line examples:**
-
-- Install a specific version:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --install 135 --silent
-  ```
-- Update to latest version:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --update --silent
-  ```
-- Reconfigure settings interactively:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --reconfigure
-  ```
-- Check for updates:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --check
-  ```
-- Downgrade to a specific version:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --down 135
-  ```
-- Remove/uninstall:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --remove --silent
-  ```
-- Change the systemd service user:
-  ```bash
-  sudo bash ./installTorrServerLinux.sh --change-user root --silent
-  ```
-
-**All available commands:**
-
-- `--install [VERSION]` - Install latest or specific version
-- `--update` - Update to latest version
-- `--reconfigure` - Reconfigure TorrServer settings (port, auth, read-only mode, logging, BBR)
-- `--check` - Check for updates (version info only)
-- `--down VERSION` - Downgrade to specific version
-- `--remove` - Uninstall TorrServer
-- `--change-user USER` - Change service user (root|torrserver)
-- `--root` - Run service as root user
-- `--silent` - Non-interactive mode with defaults
-- `--help` - Show help message
-
-#### macOS
-
-Run in Terminal.app
-
-```bash
-curl -s https://raw.githubusercontent.com/YouROK/TorrServer/master/installTorrServerMac.sh -o installTorrserverMac.sh && chmod 755 installTorrServerMac.sh && bash ./installTorrServerMac.sh
-```
-
-Alternative install script for Intel Macs: <https://github.com/dancheskus/TorrServerMacInstaller>
-
-#### IOCage Plugin (Unofficial)
-
-On FreeBSD (TrueNAS/FreeNAS) you can use this plugin: <https://github.com/filka96/iocage-plugin-TorrServer>
-
-#### NAS Systems (Unofficial)
-
-- Several releases are available through this link: <https://github.com/vladlenas>
-- **Synology NAS** packages repo source: <https://grigi.lt>
-
-### Server args
-
-- `--port PORT`, `-p PORT` - web server port (default 8090)
-- `--ssl` - enables https for web server
-- `--sslport PORT` -  web server https port (default 8091). If not set, will be taken from db (if stored previously) or the default will be used.
-- `--sslcert PATH` -  path to ssl cert file. If not set, will be taken from db (if stored previously) or default self-signed certificate/key will be generated.
-- `--sslkey PATH` - path to ssl key file. If not set, will be taken from db (if stored previously) or default self-signed certificate/key will be generated.
-- `--path PATH`, `-d PATH` - database and config dir path
-- `--logpath LOGPATH`, `-l LOGPATH` - server log file path
-- `--weblogpath WEBLOGPATH`, `-w WEBLOGPATH` - web access log file path
-- `--rdb`, `-r` - start in read-only DB mode
-- `--httpauth`, `-a` - enable http auth on all requests
-- `--dontkill`, `-k` - don't kill server on signal
-- `--ui`, `-u` - open torrserver page in browser
-- `--torrentsdir TORRENTSDIR`, `-t TORRENTSDIR` - autoload torrents from dir
-- `--torrentaddr TORRENTADDR` - Torrent client address (format [IP]:PORT, ex. :32000, 127.0.0.1:32768 etc)
-- `--pubipv4 PUBIPV4`, `-4 PUBIPV4` - set public IPv4 addr
-- `--pubipv6 PUBIPV6`, `-6 PUBIPV6` - set public IPv6 addr
-- `--searchwa`, `-s` - allow search without authentication
-- `--help`, `-h` - display this help and exit
-- `--version` - display version and exit
-
-Example:
-
-```bash
-TorrServer-darwin-arm64 [--port PORT] [--path PATH] [--logpath LOGPATH] [--weblogpath WEBLOGPATH] [--rdb] [--httpauth] [--dontkill] [--ui] [--torrentsdir TORRENTSDIR] [--torrentaddr TORRENTADDR] [--pubipv4 PUBIPV4] [--pubipv6 PUBIPV6] [--searchwa]
-```
-
-### Running in Docker & Docker Compose
-
-Run in console
-
-```bash
-docker run --rm -d --name torrserver -p 8090:8090 ghcr.io/yourok/torrserver:latest
-```
-
-For running in persistence mode, just mount volume to container by adding `-v ~/ts:/opt/ts`, where `~/ts` folder path is just example, but you could use it anyway... Result example command:
-
-```bash
-docker run --rm -d --name torrserver -v ~/ts:/opt/ts -p 8090:8090 ghcr.io/yourok/torrserver:latest
-```
-
-#### Environments
-
-- `TS_HTTPAUTH` - 1, and place auth file into `~/ts/config` folder for enabling basic auth
-- `TS_RDB` - if 1, then the enabling `--rdb` flag
-- `TS_DONTKILL` - if 1, then the enabling `--dontkill` flag
-- `TS_PORT` - for changind default port to **5555** (example), also u need to change `-p 8090:8090` to `-p 5555:5555` (example)
-- `TS_CONF_PATH` - for overriding torrserver config path inside container. Example `/opt/tsss`
-- `TS_TORR_DIR` - for overriding torrents directory. Example `/opt/torr_files`
-- `TS_LOG_PATH` - for overriding log path. Example `/opt/torrserver.log`
-
-Example with full overrided command (on default values):
-
-```bash
-docker run --rm -d -e TS_PORT=5665 -e TS_DONTKILL=1 -e TS_HTTPAUTH=1 -e TS_RDB=1 -e TS_CONF_PATH=/opt/ts/config -e TS_LOG_PATH=/opt/ts/log -e TS_TORR_DIR=/opt/ts/torrents --name torrserver -v ~/ts:/opt/ts -p 5665:5665 ghcr.io/yourok/torrserver:latest
-```
-
-#### Docker Compose
-
-```yml
-# docker-compose.yml
-
-version: '3.3'
 services:
-    torrserver:
-        image: ghcr.io/yourok/torrserver
-        container_name: torrserver
-        network_mode: host    # to allow DLNA feature
-        environment:
-            - TS_PORT=5665
-            - TS_DONTKILL=1
-            - TS_HTTPAUTH=0
-            - TS_CONF_PATH=/opt/ts/config
-            - TS_TORR_DIR=/opt/ts/torrents
-        volumes:
-            - './CACHE:/opt/ts/torrents'
-            - './CONFIG:/opt/ts/config'
-        ports:
-            - '5665:5665'
-        restart: unless-stopped
-        
-
+  torrserver:
+    image: ghcr.io/yourok/torrserver:latest
+    container_name: torrserver
+    network_mode: host              # required if you want DLNA to work
+    environment:
+      - TS_PORT=8090                # web UI / API port inside container
+      - TS_DONTKILL=1               # keep running on signals
+      - TS_HTTPAUTH=0               # set to 1 to enable basic auth
+      - TS_CONF_PATH=/opt/ts/config # config & db
+      - TS_TORR_DIR=/opt/ts/torrents
+    volumes:
+      - ./data:/opt/ts              # persistent data, config, downloads, stream, torrents
+    restart: unless-stopped
 ```
 
-### Smart TV (using Media Station X)
+Then run:
 
-1. Install **Media Station X** on your Smart TV (see [platform support](https://msx.benzac.de/info/?tab=PlatformSupport))
+```bash
+docker compose up -d
+```
 
-2. Open it and go to: **Settings -> Start Parameter -> Setup**
+Open the web UI at:
 
-3. Enter current ip and port of the TorrServe(r), e.g. `127.0.0.1:8090`
+- <http://localhost:8090>
 
-## Development
+> The `./data` directory on the host will hold everything: config, database, downloads, stream files and the `torrents` blackhole tree.
 
-#### Go server
+---
 
-To run the Go server locally, just run
+## 🧱 Directory Layout (inside container)
+
+By default TorrServer stores everything under `/opt/ts`:
+
+- `/opt/ts/config` – configuration & database.
+- `/opt/ts/data` – main data root.
+  - `/opt/ts/data/downloads/<category>` – downloaded files by category.
+  - `/opt/ts/data/stream/<category>` – streaming output & STRM files.
+- `/opt/ts/torrents` – **blackhole root** for external download managers / media apps:
+  - `/opt/ts/torrents/downloads/<category>` – `.torrent` / `.magnet` files that should be **auto‑downloaded**.
+  - `/opt/ts/torrents/stream/<category>` – `.torrent` / `.magnet` files that should be **streamed only**.
+
+Categories are the same as in the web UI (for example: `movie`, `series`, `music`, `other`, `uncategorized`).
+
+You can override locations with env variables (see below), but the structure is always the same.
+
+---
+
+## ⚙️ Environment Variables
+
+Most configuration can be done via environment variables (recommended for Docker). Below is a summary of commonly used ones:
+
+| Variable        | Default (inside container)   | Description |
+|-----------------|------------------------------|-------------|
+| `TS_PORT`       | `8090`                       | HTTP port TorrServer listens on. Map it with `-p HOST:TS_PORT`. |
+| `TS_HTTPAUTH`   | `0`                          | `1` to enable basic HTTP auth using `accs.db`. |
+| `TS_RDB`        | `0`                          | `1` to start in read‑only DB mode. |
+| `TS_DONTKILL`   | `0`                          | `1` to ignore shutdown signals (useful with some supervisors). |
+| `TS_CONF_PATH`  | `/opt/ts/config`             | Path where config and DB are stored. |
+| `TS_DATA_PATH`  | `/opt/ts/data` (effective)   | Root of internal data (downloads/stream). Auto‑resolved if not set. |
+| `TS_TORR_DIR`   | `/opt/ts/torrents`           | Root for watched torrents directory (blackhole). Can be pointed elsewhere. |
+| `TS_LOG_PATH`   | `/opt/ts/log` or inside data | Custom log file location. |
+
+Other flags are available as CLI arguments as well (see “Server Arguments” below).
+
+---
+
+## 📥 Blackhole / Autoload Torrents
+
+TorrServer Extended can automatically pick up `.torrent` and `.magnet` files from a watched directory and create torrents (and download jobs) for them.
+
+### Structure
+
+Under `TS_TORR_DIR` (default `/opt/ts/torrents` in Docker, or next to `data` when running directly) TorrServer expects:
+
+```text
+torrents/
+  downloads/
+    movie/
+    series/
+    music/
+    other/
+    uncategorized/
+  stream/
+    movie/
+    series/
+    music/
+    other/
+    uncategorized/
+```
+
+- Files in `downloads/<category>` → create torrent **and** a **download job**.
+- Files in `stream/<category>` → create torrent for **stream‑only**.
+
+TorrServer watches this directory periodically and will:
+
+- Read `.torrent` files and add them as torrents (then remove the file).
+- Read `.magnet` files (single magnet/URL per file), parse them, add as torrents (then remove the file).
+
+This makes it easy to integrate with Sonarr/Radarr and other apps that support “blackhole” style download directories.
+
+---
+
+## 🐳 Docker `run` Examples
+
+Minimal, non‑persistent run:
+
+```bash
+docker run --rm -d \
+  --name torrserver \
+  -p 8090:8090 \
+  ghcr.io/yourok/torrserver:latest
+```
+
+Persistent run with volumes and basic configuration:
+
+```bash
+docker run --rm -d \
+  --name torrserver \
+  -p 8090:8090 \
+  -e TS_PORT=8090 \
+  -e TS_DONTKILL=1 \
+  -e TS_CONF_PATH=/opt/ts/config \
+  -e TS_TORR_DIR=/opt/ts/torrents \
+  -v "$PWD/data":/opt/ts \
+  ghcr.io/yourok/torrserver:latest
+```
+
+If you need DLNA on the host network, add `--network host` (Linux only) instead of `-p`:
+
+```bash
+docker run --rm -d \
+  --name torrserver \
+  --network host \
+  -e TS_PORT=8090 \
+  -v "$PWD/data":/opt/ts \
+  ghcr.io/yourok/torrserver:latest
+```
+
+---
+
+## 🖥️ Running Natively (No Docker)
+
+You can still run TorrServer directly on your OS.
+
+### Linux & macOS
 
 ```bash
 cd server
 go run ./cmd
 ```
 
-#### Web development
+Then open <http://localhost:8090>.
 
-To run the web server locally, just run
+Alternatively, use the install scripts from the original project if you want systemd service integration.
 
-```bash
-yarn start
+### Windows
+
+Download the binary from the releases page and run it directly:
+
+```text
+TorrServer-windows-amd64.exe
 ```
 
-More info at <https://github.com/YouROK/TorrServer/tree/master/web#readme>
+---
 
-### Build
+## 🛠️ Server Arguments
 
-#### Server
+The server binary accepts command‑line flags (these can also be combined with env variables):
 
-- Install [Golang](https://golang.org/doc/install) 1.20+
-- Go to the TorrServer source directory
-- Run build script under linux or macOS `build-all.sh`
+- `--port`, `-p` – HTTP port (default `8090`).
+- `--ssl` – enable HTTPS for the web server.
+- `--sslport` – HTTPS port (default `8091`).
+- `--sslcert` – path to SSL certificate file.
+- `--sslkey` – path to SSL private key file.
+- `--path`, `-d` – database and config directory path.
+- `--logpath`, `-l` – server log file path.
+- `--weblogpath`, `-w` – web access log file path.
+- `--rdb`, `-r` – start in read‑only DB mode.
+- `--httpauth`, `-a` – enable HTTP auth on all requests.
+- `--dontkill`, `-k` – don’t stop on signals.
+- `--ui`, `-u` – open the TorrServer page in the default browser.
+- `--torrentsdir`, `-t` – override the root directory for autoloaded torrents.
+- `--torrentaddr` – override torrent client listen address.
+- `--pubipv4`, `-4` – public IPv4 address.
+- `--pubipv6`, `-6` – public IPv6 address.
+- `--searchwa`, `-s` – allow search without authentication.
+- `--help`, `-h` – show help and exit.
+- `--version` – show version and exit.
 
-#### Web
+---
 
-- Install **npm** and **yarn**
-- Go to the web directory
-- Run `NODE_OPTIONS=--openssl-legacy-provider yarn build`
+## 🔐 Authentication
 
-#### Android
+If HTTP auth is enabled (`TS_HTTPAUTH=1` or `-a/--httpauth`), TorrServer expects a file named `accs.db` in the config directory (e.g. `/opt/ts/config/accs.db`).
 
-To build an Android server you will need the Android Toolchain.
-
-#### Swagger
-
-`swag` must be installed on the system to [re]build Swagger documentation.
-
-```bash
-go install github.com/swaggo/swag/cmd/swag@latest
-cd server; swag init -g web/server.go
-
-# Documentation can be linted using
-swag fmt
-```
-
-## API
-
-### API Docs
-
-API documentation is hosted as Swagger format available at path `/swagger/index.html`.
-
-## Authentication
-
-The users data file should be located near to the settings. Basic auth, read more in wiki <https://en.wikipedia.org/wiki/Basic_access_authentication>.
-
-`accs.db` in JSON format:
+Example `accs.db` content:
 
 ```json
 {
-    "User1": "Pass1",
-    "User2": "Pass2"
+  "User1": "Pass1",
+  "User2": "Pass2"
 }
 ```
 
-Note: You should enable authentication with -a (--httpauth) TorrServer startup option.
+Basic authentication is then required for all web and API requests.
 
-## Whitelist/Blacklist IP
+---
 
-The lists file should be located in the same directory with config.db.
+## 📜 IP Whitelist / Blacklist
 
-- Whitelist file name: `wip.txt`
-- Blacklist file name: `bip.txt`
+Place the following files next to `config.db` (usually in `/opt/ts/config`):
 
-Whitelist has priority over everything else.
+- `wip.txt` – whitelist.
+- `bip.txt` – blacklist.
 
-Example:
+Whitelist has priority over blacklist. Example content:
 
 ```text
 local:127.0.0.0-127.0.0.255
 127.0.0.0-127.0.0.255
 local:127.0.0.1
 127.0.0.1
-# at the beginning of the line, comment
+# lines starting with # are comments
 ```
 
-## Donate
+---
 
-- [YooMoney](https://yoomoney.ru/to/410013733697114/200)
-- [Boosty](https://boosty.to/yourok)
-- [TBank](https://www.tbank.ru/cf/742qEMhKhKn)
+## 📺 Smart TV (Media Station X)
 
-## Thanks to everyone who tested and helped
+1. Install **Media Station X** on your Smart TV (see [platform support](https://msx.benzac.de/info/?tab=PlatformSupport)).
+2. Open it and go to: **Settings → Start Parameter → Setup**.
+3. Enter the current IP and port of TorrServer, for example: `http://192.168.1.10:8090`.
 
-- [anacrolix](https://github.com/anacrolix) Matt Joiner
-- [tsynik](https://github.com/tsynik)
-- [dancheskus](https://github.com/dancheskus) for react web GUI and PWA code
-- [kolsys](https://github.com/kolsys) for initial Media Station X support
-- [damiva](https://github.com/damiva) for Media Station X code updates
-- [vladlenas](https://github.com/vladlenas) for NAS builds
-- [Nemiroff](https://github.com/Nemiroff) Tw1cker
-- [spawnlmg](https://github.com/spawnlmg) SpAwN_LMG for testing
-- [TopperBG](https://github.com/TopperBG) Dimitar Maznekov for Bulgarian web translation
-- [FaintGhost](https://github.com/FaintGhost) Zhang Yaowei for Simplified Chinese web translation
-- [Anton111111](https://github.com/Anton111111) Anton Potekhin for sleep on Windows fixes
-- [lieranderl](https://github.com/lieranderl) Evgeni for adding SSL support code
-- [cocool97](https://github.com/cocool97) for openapi API documentation and torrent categories
-- [shadeov](https://github.com/shadeov) for README improvements
-- [butaford](https://github.com/butaford) Pavel for make docker file and scripts
-- [filimonic](https://github.com/filimonic) Alexey D. Filimonov
-- [leporel](https://github.com/leporel) Viacheslav Evseev
-- and others
+---
+
+## 📚 API & Swagger
+
+TorrServer exposes a simple HTTP API which is documented via Swagger/OpenAPI.
+
+- Swagger UI: `http://<host>:<port>/swagger/index.html`
+
+This can be used to integrate custom tools, bots, or media frontends.
+
+---
+
+## 🤝 Credits & Thanks
+
+TorrServer is originally created and maintained by the [YouROK](https://github.com/YouROK/TorrServer) project and a large community of contributors.
+
+Thanks to everyone who has tested, translated, packaged, and integrated TorrServer across platforms and devices.
