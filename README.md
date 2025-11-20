@@ -46,7 +46,7 @@ version: "3.8"
 
 services:
   torrserver:
-    image: ghcr.io/yourok/torrserver:latest
+    image: ghcr.io/alternativniy/torrserver:latest
     container_name: torrserver
     network_mode: host              # required if you want DLNA to work
     environment:
