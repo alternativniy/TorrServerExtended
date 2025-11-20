@@ -349,4 +349,23 @@ func ensureDataDirectories(sets *BTSets) {
 			ensure(filepath.Join(sets.StreamPath, category))
 		}
 	}
+	// also ensure default torrents root structure for Sonarr/Radarr blackhole-like workflows
+	torrentsRoot := strings.TrimSpace(os.Getenv("TS_TORR_DIR"))
+	if torrentsRoot == "" {
+		// by default, keep torrents root next to DataPath (dev-friendly)
+		base := strings.TrimSpace(sets.DataPath)
+		if base == "" {
+			base = filepath.Join(Path, "data")
+		}
+		parent := filepath.Dir(base)
+		if parent == "" || parent == "." || parent == string(os.PathSeparator) {
+			parent = "."
+		}
+		torrentsRoot = filepath.Join(parent, "torrents")
+	}
+	ensure(torrentsRoot)
+	for _, category := range CategoryFolders() {
+		ensure(filepath.Join(torrentsRoot, "downloads", category))
+		ensure(filepath.Join(torrentsRoot, "stream", category))
+	}
 }

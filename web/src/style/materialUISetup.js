@@ -94,6 +94,13 @@ export const useMaterialUITheme = () => {
               },
             },
           },
+          MuiCheckbox: {
+            root: {
+              '&.Mui-checked': {
+                color: 'rgba(255, 255, 255, 0.7) !important',
+              },
+            },
+          },
         },
       }),
     [theme],

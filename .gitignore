@@ -39,3 +39,4 @@ toolchains/
 /server/settings.json
 /server/viewed.json
 /server/data
+/server/torrents

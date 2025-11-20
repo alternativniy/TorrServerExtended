@@ -7,22 +7,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"server"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/alexflint/go-arg"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-
-	"github.com/alexflint/go-arg"
 	"github.com/pkg/browser"
 
-	"server"
 	"server/docs"
 	"server/log"
 	"server/settings"
 	"server/torr"
 	"server/version"
+	utils "server/web/api/utils"
+
+	_ "server/docs"
+	_ "server/web/api"
 )
 
 type args struct {
@@ -39,7 +42,7 @@ type args struct {
 	HttpAuth    bool   `arg:"-a" help:"enable http auth on all requests"`
 	DontKill    bool   `arg:"-k" help:"don't kill server on signal"`
 	UI          bool   `arg:"-u" help:"open torrserver page in browser"`
-	TorrentsDir string `arg:"-t" help:"autoload torrents from dir"`
+	TorrentsDir string `arg:"-t" help:"autoload torrents from dir (root with downloads/stream subdirs)"`
 	TorrentAddr string `help:"Torrent client address, like 127.0.0.1:1337 (default :PeersListenPort)"`
 	PubIPv4     string `arg:"-4" help:"set public IPv4 addr"`
 	PubIPv6     string `arg:"-6" help:"set public IPv6 addr"`
@@ -106,9 +109,7 @@ func main() {
 		settings.PubIPv6 = params.PubIPv6
 	}
 
-	if params.TorrentsDir != "" {
-		go watchTDir(params.TorrentsDir)
-	}
+	go watchTDir(params.TorrentsDir)
 
 	if params.MaxSize != "" {
 		maxSize, err := strconv.ParseInt(params.MaxSize, 10, 64)
@@ -145,49 +146,161 @@ func dnsResolve() {
 	}
 }
 
-func watchTDir(dir string) {
+func watchTDir(root string) {
 	time.Sleep(5 * time.Second)
-	path, err := filepath.Abs(dir)
+	root = strings.TrimSpace(root)
+	if root == "" {
+		// prefer explicit TS_TORR_DIR if set
+		if env := strings.TrimSpace(os.Getenv("TS_TORR_DIR")); env != "" {
+			root = env
+		} else {
+			// fall back to the same dev-friendly logic as ensureDataDirectories:
+			// keep torrents root next to DataPath / Path
+			base := strings.TrimSpace(settings.BTsets.DataPath)
+			if base == "" {
+				base = filepath.Join(settings.Path, "data")
+			}
+			parent := filepath.Dir(base)
+			if parent == "" || parent == "." || parent == string(os.PathSeparator) {
+				parent = "."
+			}
+			root = filepath.Join(parent, "torrents")
+		}
+	}
+	path, err := filepath.Abs(root)
 	if err != nil {
-		path = dir
+		path = root
 	}
 	for {
-		files, err := os.ReadDir(path)
-		if err == nil {
-			for _, file := range files {
-				filename := filepath.Join(path, file.Name())
-				if strings.ToLower(filepath.Ext(file.Name())) == ".torrent" {
-					sp, err := openFile(filename)
-					if err == nil {
-						tor, err := torr.AddTorrent(sp, "", "", "", "")
-						if err == nil {
-							if tor.GotInfo() {
-								if tor.Title == "" {
-									tor.Title = tor.Name()
-								}
-								torr.SaveTorrentToDB(tor)
-								tor.Drop()
-								os.Remove(filename)
-								time.Sleep(time.Second)
-							} else {
-								log.TLogln("Error get info from torrent")
-							}
-						} else {
-							log.TLogln("Error parse torrent file:", err)
-						}
-					} else {
-						log.TLogln("Error parse file name:", err)
-					}
-				}
-			}
-		} else {
-			log.TLogln("Error read dir:", err)
+		if _, err := os.ReadDir(path); err != nil {
+			log.TLogln("Error read torrents root:", err)
+			time.Sleep(5 * time.Second)
+			continue
 		}
-		time.Sleep(time.Second * 5)
+		processTorrentsRoot(path)
+		time.Sleep(5 * time.Second)
 	}
 }
 
-func openFile(path string) (*torrent.TorrentSpec, error) {
+func processTorrentsRoot(root string) {
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			log.TLogln("Error walking torrents dir:", err)
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		lower := strings.ToLower(name)
+		if strings.HasSuffix(lower, ".torrent") {
+			processTorrentFile(root, p)
+			return nil
+		}
+		if strings.HasSuffix(lower, ".magnet") {
+			processMagnetFile(root, p)
+			return nil
+		}
+		return nil
+	})
+}
+
+func processTorrentFile(root, fullPath string) {
+	sp, err := openTorrentSpec(fullPath)
+	if err != nil {
+		log.TLogln("Error parse torrent file:", err)
+		return
+	}
+	mode, category := inferModeAndCategory(root, fullPath)
+	title := ""
+	poster := ""
+	data := ""
+	tor, err := torr.AddTorrent(sp, title, poster, data, category)
+	if err != nil {
+		log.TLogln("Error add torrent from file:", err)
+		return
+	}
+	if !tor.GotInfo() {
+		log.TLogln("Error get info from torrent")
+		return
+	}
+	if tor.Title == "" {
+		if tor.Name() != "" {
+			tor.Title = tor.Name()
+		} else if sp.DisplayName != "" {
+			tor.Title = sp.DisplayName
+		}
+	}
+	torr.SaveTorrentToDB(tor)
+	if mode == "download" {
+		_, err = torr.CreateDownloadJobForTorrent(tor, tor.Title, nil, "")
+		if err != nil {
+			log.TLogln("Error create download job:", err)
+		}
+	}
+	tor.Drop()
+	_ = os.Remove(fullPath)
+}
+
+func processMagnetFile(root, fullPath string) {
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		log.TLogln("Error read magnet file:", err)
+		return
+	}
+	link := strings.TrimSpace(string(content))
+	if link == "" {
+		_ = os.Remove(fullPath)
+		return
+	}
+	mode, category := inferModeAndCategory(root, fullPath)
+	title := ""
+	poster := ""
+	data := ""
+	// Reuse existing magnet parsing logic from web/api/utils
+	sp, err := utils.ParseLink(link)
+	if err != nil {
+		log.TLogln("Error parse magnet link:", err)
+		return
+	}
+	tor, err := torr.AddTorrent(sp, title, poster, data, category)
+	if err != nil {
+		log.TLogln("Error add magnet torrent:", err)
+		return
+	}
+	torr.SaveTorrentToDB(tor)
+	if mode == "download" {
+		_, err = torr.CreateDownloadJobForTorrent(tor, tor.Title, nil, "")
+		if err != nil {
+			log.TLogln("Error create download job from magnet:", err)
+		}
+	}
+	tor.Drop()
+	_ = os.Remove(fullPath)
+}
+
+func inferModeAndCategory(root, fullPath string) (mode string, category string) {
+	rel, err := filepath.Rel(root, fullPath)
+	if err != nil {
+		return "stream", "other"
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 2 {
+		return "stream", "other"
+	}
+	switch strings.ToLower(parts[0]) {
+	case "downloads":
+		mode = "download"
+	case "stream":
+		mode = "stream"
+	default:
+		mode = "stream"
+	}
+	category = settings.CategoryFolder(parts[1])
+	return
+}
+
+func openTorrentSpec(path string) (*torrent.TorrentSpec, error) {
 	minfo, err := metainfo.LoadFromFile(path)
 	if err != nil {
 		return nil, err
