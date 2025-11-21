@@ -12,17 +12,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexflint/go-arg"
-	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
-	"github.com/pkg/browser"
-
-	"server/docs"
 	"server/log"
 	"server/settings"
 	"server/torr"
 	"server/version"
 	utils "server/web/api/utils"
+
+	"github.com/alexflint/go-arg"
+	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/pkg/browser"
 
 	_ "server/docs"
 	_ "server/web/api"
@@ -81,8 +80,6 @@ func main() {
 	if params.RDB {
 		log.TLogln("Running in Read-only DB mode!")
 	}
-	docs.SwaggerInfo.Version = version.Version
-
 	dnsResolve()
 	Preconfig(params.DontKill)
 
@@ -183,6 +180,7 @@ func watchTDir(root string) {
 }
 
 func processTorrentsRoot(root string) {
+	seen := make(map[string]string)
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			log.TLogln("Error walking torrents dir:", err)
@@ -193,23 +191,46 @@ func processTorrentsRoot(root string) {
 		}
 		name := d.Name()
 		lower := strings.ToLower(name)
-		if strings.HasSuffix(lower, ".torrent") {
-			processTorrentFile(root, p)
-			return nil
-		}
-		if strings.HasSuffix(lower, ".magnet") {
-			processMagnetFile(root, p)
-			return nil
+		if strings.HasSuffix(lower, ".torrent") || strings.HasSuffix(lower, ".magnet") {
+			// track presence for auto-removal logic (path -> hash)
+			var hash string
+			if strings.HasSuffix(lower, ".torrent") {
+				hash = processTorrentFile(root, p)
+			} else {
+				hash = processMagnetFile(root, p)
+			}
+			if hash != "" {
+				seen[p] = hash
+			}
 		}
 		return nil
 	})
+
+	// Auto-remove torrents whose blackhole files disappeared
+	existing := settings.ListBlackholeEntries()
+	// update / add current ones
+	for path, hash := range seen {
+		settings.SaveBlackholeEntry(path, hash)
+		delete(existing, path)
+	}
+	// anything left in existing has no corresponding file anymore
+	for path, hash := range existing {
+		if hash == "" {
+			settings.RemoveBlackholeEntry(path)
+			continue
+		}
+		log.TLogln("Blackhole file missing, auto-remove torrent", hash)
+		deleteFiles := settings.BTsets != nil && settings.BTsets.BlackholeRemoveFiles
+		torr.RemTorrent(hash, deleteFiles)
+		settings.RemoveBlackholeEntry(path)
+	}
 }
 
-func processTorrentFile(root, fullPath string) {
+func processTorrentFile(root, fullPath string) string {
 	sp, err := openTorrentSpec(fullPath)
 	if err != nil {
 		log.TLogln("Error parse torrent file:", err)
-		return
+		return ""
 	}
 	mode, category := inferModeAndCategory(root, fullPath)
 	title := ""
@@ -218,11 +239,11 @@ func processTorrentFile(root, fullPath string) {
 	tor, err := torr.AddTorrent(sp, title, poster, data, category)
 	if err != nil {
 		log.TLogln("Error add torrent from file:", err)
-		return
+		return ""
 	}
 	if !tor.GotInfo() {
 		log.TLogln("Error get info from torrent")
-		return
+		return ""
 	}
 	if tor.Title == "" {
 		if tor.Name() != "" {
@@ -238,20 +259,20 @@ func processTorrentFile(root, fullPath string) {
 			log.TLogln("Error create download job:", err)
 		}
 	}
+	hash := tor.Hash().HexString()
 	tor.Drop()
-	_ = os.Remove(fullPath)
+	return hash
 }
 
-func processMagnetFile(root, fullPath string) {
+func processMagnetFile(root, fullPath string) string {
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		log.TLogln("Error read magnet file:", err)
-		return
+		return ""
 	}
 	link := strings.TrimSpace(string(content))
 	if link == "" {
-		_ = os.Remove(fullPath)
-		return
+		return ""
 	}
 	mode, category := inferModeAndCategory(root, fullPath)
 	title := ""
@@ -261,12 +282,12 @@ func processMagnetFile(root, fullPath string) {
 	sp, err := utils.ParseLink(link)
 	if err != nil {
 		log.TLogln("Error parse magnet link:", err)
-		return
+		return ""
 	}
 	tor, err := torr.AddTorrent(sp, title, poster, data, category)
 	if err != nil {
 		log.TLogln("Error add magnet torrent:", err)
-		return
+		return ""
 	}
 	torr.SaveTorrentToDB(tor)
 	if mode == "download" {
@@ -275,8 +296,9 @@ func processMagnetFile(root, fullPath string) {
 			log.TLogln("Error create download job from magnet:", err)
 		}
 	}
+	hash := tor.Hash().HexString()
 	tor.Drop()
-	_ = os.Remove(fullPath)
+	return hash
 }
 
 func inferModeAndCategory(root, fullPath string) (mode string, category string) {

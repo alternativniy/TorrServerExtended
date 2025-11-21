@@ -65,6 +65,9 @@ type BTSets struct {
 	// Data
 	GenerateStrmFiles      bool
 	ForceGenerateStrmFiles bool
+
+	// Blackhole / auto-removal
+	BlackholeRemoveFiles bool // remove downloaded files on auto-removal (not just STRM)
 }
 
 func (v *BTSets) String() string {
@@ -105,6 +108,10 @@ func SetBTSets(sets *BTSets) {
 
 	if sets.MaxDownloadJobs <= 0 {
 		sets.MaxDownloadJobs = 3
+	}
+	// default: when blackhole is used, also remove files from disk on auto-removal
+	if !sets.BlackholeRemoveFiles {
+		sets.BlackholeRemoveFiles = true
 	}
 
 	normalizeBTSets(sets)
@@ -149,6 +156,7 @@ func SetDefaultConfig() {
 	sets.TorrentDisconnectTimeout = 30
 	sets.ReaderReadAHead = 95 // 95%
 	sets.MaxDownloadJobs = 3
+	sets.BlackholeRemoveFiles = true
 	normalizeBTSets(sets)
 	BTsets = sets
 	ensureDataDirectories(BTsets)

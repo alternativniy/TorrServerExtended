@@ -186,6 +186,8 @@
     "ForceGenerateStrmFilesHint": "Всегда пересоздавать .strm-файлы даже без изменений.",
     "MaxDownloadJobs": "Параллельные загрузки",
     "MaxDownloadJobsHint": "Максимальное число одновременных загрузок",
+        "BlackholeRemoveFiles": "Удалять файлы при авто-удалении по blackhole",
+        "BlackholeRemoveFilesHint": "Если исходный .torrent/.magnet исчез из дерева blackhole, удалить также и загруженные данные с диска.",
         "DHT": "DHT (Distributed Hash Table)",
         "DisableDHTHint": "Распределенная хэш-таблица - отключите при отсутствии сети после запуска сервера",
         "DisablePEXHint": "Обмен списками участников - не рекомендуется отключать",

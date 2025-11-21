@@ -1,16 +1,16 @@
 <p align="center" style="text-align: center">
-  <img src="https://github.com/YouROK/TorrServer/assets/144587546/53f7175a-cda4-4a06-86b6-2ac07582dcf1" width="33%"><br/>
+  <img src="https://github.com/alternativniy/TorrServerExtended/assets/144587546/53f7175a-cda4-4a06-86b6-2ac07582dcf1" width="33%"><br/>
 </p>
 
 <p align="center">
-  <b>Simple and powerful torrent streaming server.</b>
+  <b>Simple and powerful torrent download and streaming server.</b>
   <br/>
   <br/>
-  <a href="https://github.com/YouROK/TorrServer/blob/master/LICENSE">
-    <img alt="GitHub" src="https://img.shields.io/github/license/YouROK/TorrServer"/>
+  <a href="https://github.com/alternativniy/TorrServerExtended/blob/master/LICENSE">
+    <img alt="GitHub" src="https://img.shields.io/github/license/alternativniy/TorrServerExtended"/>
   </a>
-  <a href="https://github.com/YouROK/TorrServer/tags" rel="nofollow">
-    <img alt="GitHub tag (latest SemVer pre-release)" src="https://img.shields.io/github/v/tag/YouROK/TorrServer?include_prereleases&label=version"/>
+  <a href="https://github.com/alternativniy/TorrServerExtended/tags" rel="nofollow">
+    <img alt="GitHub tag (latest SemVer pre-release)" src="https://img.shields.io/github/v/tag/alternativniy/TorrServerExtended?include_prereleases&label=version"/>
   </a>
 </p>
 
@@ -27,6 +27,7 @@
 ## ✨ Features
 
 - 🎬 **Instant torrent streaming** – play while downloading, no manual pre‑download.
+- 💾 **Download to disk** – persistent download jobs with per‑category folders and optional auto‑cleanup via the blackhole directory.
 - 🌐 **Web UI** – manage torrents and playback from any browser.
 - 🧲 **Magnet & .torrent support** – drop `.torrent` or `.magnet` files into a watched folder and they are picked up automatically.
 - 📂 **Blackhole integration** – out‑of‑the‑box directory layout for Sonarr/Radarr‑like apps (`downloads/stream` + categories).
@@ -142,13 +143,14 @@ torrents/
     uncategorized/
 ```
 
-- Files in `downloads/<category>` → create torrent **and** a **download job**.
+- Files in `downloads/<category>` → create torrent **and** a **download job**, storing finished files under `/data/downloads/<category>` so they can be picked up by other apps or media libraries.
 - Files in `stream/<category>` → create torrent for **stream‑only**.
 
 TorrServer watches this directory periodically and will:
 
 - Read `.torrent` files and add them as torrents (then remove the file).
 - Read `.magnet` files (single magnet/URL per file), parse them, add as torrents (then remove the file).
+- Automatically keep download jobs and on‑disk files in sync with the presence of source files in the blackhole tree.
 
 This makes it easy to integrate with Sonarr/Radarr and other apps that support “blackhole” style download directories.
 
@@ -162,7 +164,7 @@ Minimal, non‑persistent run:
 docker run --rm -d \
   --name torrserver \
   -p 8090:8090 \
-  ghcr.io/yourok/torrserver:latest
+  ghcr.io/alternativniy/torrserverextended:latest
 ```
 
 Persistent run with volumes and basic configuration:
@@ -176,7 +178,7 @@ docker run --rm -d \
   -e TS_CONF_PATH=/opt/ts/config \
   -e TS_TORR_DIR=/opt/ts/torrents \
   -v "$PWD/data":/opt/ts \
-  ghcr.io/yourok/torrserver:latest
+  ghcr.io/alternativniy/torrserverextended:latest
 ```
 
 If you need DLNA on the host network, add `--network host` (Linux only) instead of `-p`:
@@ -187,7 +189,7 @@ docker run --rm -d \
   --network host \
   -e TS_PORT=8090 \
   -v "$PWD/data":/opt/ts \
-  ghcr.io/yourok/torrserver:latest
+  ghcr.io/alternativniy/torrserverextended:latest
 ```
 
 ---
@@ -299,6 +301,6 @@ This can be used to integrate custom tools, bots, or media frontends.
 
 ## 🤝 Credits & Thanks
 
-TorrServer is originally created and maintained by the [YouROK](https://github.com/YouROK/TorrServer) project and a large community of contributors.
+TorrServer is originally created and maintained by the [YouROK](https://github.com/alternativniy/TorrServerExtended) project and a large community of contributors.
 
 Thanks to everyone who has tested, translated, packaged, and integrated TorrServer across platforms and devices.

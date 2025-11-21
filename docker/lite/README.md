@@ -2,7 +2,7 @@
 
 A lightweight container that contains a single TorrServer file
 
-Source code: https://github.com/YouROK/TorrServer
+Source code: https://github.com/alternativniy/TorrServerExtended
 
 --------
 

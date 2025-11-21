@@ -186,6 +186,8 @@
     "ForceGenerateStrmFilesHint": "Always rewrite .strm files during sync even if nothing changed.",
     "MaxDownloadJobs": "Parallel downloads",
     "MaxDownloadJobsHint": "Maximum number of simultaneous download jobs",
+    "BlackholeRemoveFiles": "Remove files on blackhole auto-removal",
+    "BlackholeRemoveFilesHint": "When a .torrent/.magnet file disappears from the blackhole tree, also delete the downloaded data from disk.",
         "DHT": "DHT (Distributed Hash Table)",
         "DisableDHTHint": "Disable if there is no network after starting the server",
         "DisablePEXHint": "Better leave enabled",

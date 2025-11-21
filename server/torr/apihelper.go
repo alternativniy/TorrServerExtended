@@ -77,8 +77,6 @@ func AddTorrent(spec *torrent.TorrentSpec, title, poster string, data string, ca
 			torr.Data = torDB.Data
 		}
 	}
-
-	syncLibraryStrm(torr)
 	return torr, nil
 }
 
@@ -162,7 +160,6 @@ func SetTorrent(hashHex, title, poster, category string, data string) *Torrent {
 	if torr == nil {
 		torr = torrDb
 	}
-	syncLibraryStrm(torr)
 	if torr != nil {
 		return torr
 	} else {
