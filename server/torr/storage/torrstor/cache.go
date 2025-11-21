@@ -76,6 +76,9 @@ func (c *Cache) Init(info *metainfo.Info, hash metainfo.Hash) {
 }
 
 func (c *Cache) SetTorrent(torr *torrent.Torrent) {
+	if c == nil || torr == nil {
+		return
+	}
 	c.torrent = torr
 }
 
@@ -311,6 +314,9 @@ func (c *Cache) isIdInFileBE(ranges []Range, id int) bool {
 ////////
 
 func (c *Cache) NewReader(file *torrent.File) *Reader {
+	if c == nil {
+		return nil
+	}
 	return newReader(file, c)
 }
 

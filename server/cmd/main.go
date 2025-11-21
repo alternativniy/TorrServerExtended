@@ -284,10 +284,30 @@ func processMagnetFile(root, fullPath string) string {
 		log.TLogln("Error parse magnet link:", err)
 		return ""
 	}
+	// Avoid creating duplicate torrents and jobs for the same magnet while metadata is pending.
+	if existing := torr.GetTorrent(sp.InfoHash.HexString()); existing != nil {
+		// Magnet already tracked; just return its hash without logging.
+		return existing.Hash().HexString()
+	}
 	tor, err := torr.AddTorrent(sp, title, poster, data, category)
 	if err != nil {
 		log.TLogln("Error add magnet torrent:", err)
 		return ""
+	}
+	// Ensure we have metadata before saving to DB to avoid panics
+	if !tor.GotInfo() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		for !tor.GotInfo() {
+			if ctx.Err() != nil {
+				log.TLogln("Timeout waiting for torrent info from magnet:", link)
+				if tor != nil {
+					tor.Drop()
+				}
+				return ""
+			}
+			time.Sleep(time.Second)
+		}
 	}
 	torr.SaveTorrentToDB(tor)
 	if mode == "download" {
@@ -297,7 +317,9 @@ func processMagnetFile(root, fullPath string) string {
 		}
 	}
 	hash := tor.Hash().HexString()
-	tor.Drop()
+	if tor != nil {
+		tor.Drop()
+	}
 	return hash
 }
 

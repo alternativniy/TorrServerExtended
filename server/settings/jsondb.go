@@ -39,21 +39,24 @@ func (v *JsonDB) CloseDB() {
 }
 
 func (v *JsonDB) Set(xPath, name string, value []byte) {
-	var err error = nil
 	jsonObj := map[string]interface{}{}
-	if err := json.Unmarshal(value, &jsonObj); err == nil {
-		if filename, err := v.xPathToFilename(xPath); err == nil {
-			v.lock(filename)
-			defer v.unlock(filename)
-			if root, err := v.readJsonFileAsMap(filename); err == nil {
-				root[name] = jsonObj
-				if err = v.writeMapAsJsonFile(filename, root); err == nil {
-					return
-				}
+	if err := json.Unmarshal(value, &jsonObj); err != nil {
+		// For non-JSON payloads (like plain strings) we silently ignore,
+		// since JsonDB is only meant for structured settings.
+		return
+	}
+	if filename, err := v.xPathToFilename(xPath); err == nil {
+		v.lock(filename)
+		defer v.unlock(filename)
+		if root, err := v.readJsonFileAsMap(filename); err == nil {
+			root[name] = jsonObj
+			if err = v.writeMapAsJsonFile(filename, root); err == nil {
+				return
 			}
 		}
 	}
-	v.log(fmt.Sprintf("Set: error writing entry %s->%s", xPath, name), err)
+	// Log only when there is a real error in the JSON path/IO pipeline.
+	v.log(fmt.Sprintf("Set: error writing entry %s->%s", xPath, name))
 }
 
 func (v *JsonDB) Get(xPath, name string) []byte {
@@ -109,10 +112,10 @@ func (v *JsonDB) Rem(xPath, name string) {
 }
 
 func (v *JsonDB) lock(filename string) {
-	var mtx sync.Mutex
-	if mtx, ok := jsonDbLocks[filename]; !ok {
+	mtx, ok := jsonDbLocks[filename]
+	if !ok {
 		mtx = new(sync.Mutex)
-		jsonDbLocks[v.Path] = mtx
+		jsonDbLocks[filename] = mtx
 	}
 	mtx.Lock()
 }

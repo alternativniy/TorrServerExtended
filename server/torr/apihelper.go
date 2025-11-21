@@ -94,33 +94,16 @@ func GetTorrent(hashHex string) *Torrent {
 	if timeout > time.Minute {
 		timeout = time.Minute
 	}
-	tor := bts.GetTorrent(hash)
-	if tor != nil {
+	if tor := bts.GetTorrent(hash); tor != nil {
 		tor.AddExpiredTime(timeout)
 		return tor
 	}
 
-	tr := GetTorrentDB(hash)
-	if tr != nil {
-		tor = tr
-		go func() {
-			if bts == nil {
-				return
-			}
-			log.TLogln("New torrent", tor.Hash())
-			tr, _ := NewTorrent(tor.TorrentSpec, bts)
-			if tr != nil {
-				tr.Title = tor.Title
-				tr.Poster = tor.Poster
-				tr.Data = tor.Data
-				tr.Size = tor.Size
-				tr.Timestamp = tor.Timestamp
-				tr.Category = tor.Category
-				tr.GotInfo()
-			}
-		}()
-	}
-	return tor
+	// Fallback to DB-only torrent; do not auto-spawn BT torrent here.
+	// For blackhole/download jobs we expect AddTorrent/process* to create
+	// the live torrent explicitly; on restart, the watcher will re-add it
+	// if needed. Returning the DB-backed Torrent is enough for metadata.
+	return GetTorrentDB(hash)
 }
 
 func SetTorrent(hashHex, title, poster, category string, data string) *Torrent {

@@ -116,8 +116,15 @@ func (t *Torrent) WaitInfo() bool {
 
 	select {
 	case <-t.Torrent.GotInfo():
-		t.cache = t.bt.storage.GetCache(t.Hash())
-		t.cache.SetTorrent(t.Torrent)
+		// К этому моменту anacrolix уже должен был создать Cache через Storage.OpenTorrent.
+		// Если по какой-то причине кэша нет, не считаем это фатальной ошибкой для GotInfo:
+		// торрент всё равно переходит в рабочее состояние, просто без привязанного Cache.
+		if t.bt != nil && t.bt.storage != nil {
+			if c := t.bt.storage.GetCache(t.Hash()); c != nil {
+				t.cache = c
+				c.SetTorrent(t.Torrent)
+			}
+		}
 		return true
 	case <-t.closed:
 		return false
@@ -217,11 +224,17 @@ func (t *Torrent) updateRA() {
 	// 	}
 	// 	go t.cache.AdjustRA(adj)
 	// }
+	if t.cache == nil {
+		return
+	}
 	adj := int64(16 << 20) // 16 MB fixed RA
 	go t.cache.AdjustRA(adj)
 }
 
 func (t *Torrent) expired() bool {
+	if t.cache == nil {
+		return t.expiredTime.Before(time.Now()) && (t.Stat == state.TorrentWorking || t.Stat == state.TorrentClosed)
+	}
 	return t.cache.Readers() == 0 && t.expiredTime.Before(time.Now()) && (t.Stat == state.TorrentWorking || t.Stat == state.TorrentClosed)
 }
 
@@ -254,8 +267,10 @@ func (t *Torrent) NewReader(file *torrent.File) *torrstor.Reader {
 	if t.Stat == state.TorrentClosed {
 		return nil
 	}
-	reader := t.cache.NewReader(file)
-	return reader
+	if t.cache == nil {
+		return nil
+	}
+	return t.cache.NewReader(file)
 }
 
 func (t *Torrent) CloseReader(reader *torrstor.Reader) {

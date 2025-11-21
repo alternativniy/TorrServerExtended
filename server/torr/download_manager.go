@@ -80,13 +80,14 @@ func getDownloadManager() *downloadManager {
 	return dlManager
 }
 
-func isMetadataError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "failed to retrieve torrent metadata")
-}
+// kept for backward compatibility / potential future use
+// func isMetadataError(err error) bool {
+// 	if err == nil {
+// 		return false
+// 	}
+// 	msg := strings.ToLower(err.Error())
+// 	return strings.Contains(msg, "failed to retrieve torrent metadata")
+// }
 
 // withJobLock captures a snapshot of a job under its mutex and applies fn to it
 // without holding the mutex during fn execution. This helps to avoid keeping
@@ -216,22 +217,7 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 
 	m.handleStrmOnStart(job)
 
-	var err error
-	const (
-		maxMetaRetries = 3
-		metaRetryDelay = 5 * time.Second
-	)
-	for attempt := 0; attempt < maxMetaRetries; attempt++ {
-		err = m.executeJob(ctx, job)
-		if err == nil || !isMetadataError(err) {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(metaRetryDelay):
-		}
-	}
+	err := m.executeJob(ctx, job)
 
 	// Clear cancel and update status based on result.
 	var completed bool
@@ -267,34 +253,48 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 }
 
 func (m *downloadManager) executeJob(ctx context.Context, job *DownloadJob) error {
-	torr := GetTorrent(job.Hash)
-	if torr == nil {
-		return fmt.Errorf("torrent %s not found", job.Hash)
-	}
-	if torr.Torrent == nil {
-		loaded := LoadTorrent(torr)
-		if loaded == nil {
-			return fmt.Errorf("failed to load torrent %s", job.Hash)
+	// Resolve torrent (с лимитированными ретраями по реальным ошибкам),
+	// а затем бесконечно ждём метаданные до cancel.
+	const (
+		loadRetryCount = 3
+		loadRetryDelay = 5 * time.Second
+		metaWaitStep   = time.Second
+	)
+
+	var torr *Torrent
+	for attempt := 0; attempt < loadRetryCount; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		torr = loaded
+
+		torr = GetTorrent(job.Hash)
+		if torr == nil {
+			time.Sleep(loadRetryDelay)
+			continue
+		}
+
+		if torr.Torrent == nil {
+			// Пытаемся лениво поднять торрент из DB-спека.
+			if loaded := LoadTorrent(torr); loaded != nil {
+				torr = loaded
+				break
+			}
+			// Ошибка загрузки торрента – даём ещё пару попыток.
+			time.Sleep(loadRetryDelay)
+			continue
+		}
+		break
+	}
+	if torr == nil || torr.Torrent == nil {
+		return fmt.Errorf("failed to load torrent %s", job.Hash)
 	}
 
-	if !torr.GotInfo() {
-		const (
-			metaWaitStep = time.Second
-			metaWaitMax  = 30 * time.Second
-		)
-		waited := time.Duration(0)
-		for !torr.GotInfo() {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if waited >= metaWaitMax {
-				return errors.New("failed to retrieve torrent metadata: timeout")
-			}
-			time.Sleep(metaWaitStep)
-			waited += metaWaitStep
+	// Теперь ждём GotInfo сколько потребуется, прерываясь только по ctx.
+	for !torr.GotInfo() {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		time.Sleep(metaWaitStep)
 	}
 
 	if job.BytesTotal == 0 {
@@ -675,14 +675,14 @@ func (m *downloadManager) getJob(id string) *DownloadJob {
 	return nil
 }
 
-func (job *DownloadJob) updateStatus(status DownloadStatus, errMsg string) {
-	withJobLock(job, func(j *DownloadJob) struct{} {
-		j.Status = status
-		j.Error = errMsg
-		j.UpdatedAt = time.Now()
-		return struct{}{}
-	})
-}
+// func (job *DownloadJob) updateStatus(status DownloadStatus, errMsg string) {
+// 	withJobLock(job, func(j *DownloadJob) struct{} {
+// 		j.Status = status
+// 		j.Error = errMsg
+// 		j.UpdatedAt = time.Now()
+// 		return struct{}{}
+// 	})
+// }
 
 func (job *DownloadJob) addProgress(n int64) bool {
 	return withJobLock(job, func(j *DownloadJob) bool {
@@ -766,21 +766,21 @@ func (job *DownloadJob) fileProgress(root string, st *state.TorrentFileStat) int
 	return 0
 }
 
-func (job *DownloadJob) requestPause() {
-	withJobLock(job, func(j *DownloadJob) struct{} {
-		j.pauseRequested = true
-		j.UpdatedAt = time.Now()
-		return struct{}{}
-	})
-}
+// func (job *DownloadJob) requestPause() {
+// 	withJobLock(job, func(j *DownloadJob) struct{} {
+// 		j.pauseRequested = true
+// 		j.UpdatedAt = time.Now()
+// 		return struct{}{}
+// 	})
+// }
 
-func (job *DownloadJob) clearPauseRequest() {
-	withJobLock(job, func(j *DownloadJob) struct{} {
-		j.pauseRequested = false
-		j.UpdatedAt = time.Now()
-		return struct{}{}
-	})
-}
+// func (job *DownloadJob) clearPauseRequest() {
+// 	withJobLock(job, func(j *DownloadJob) struct{} {
+// 		j.pauseRequested = false
+// 		j.UpdatedAt = time.Now()
+// 		return struct{}{}
+// 	})
+// }
 
 func (job *DownloadJob) isPauseRequested() bool {
 	return withJobLock(job, func(j *DownloadJob) bool {
