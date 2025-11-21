@@ -116,7 +116,8 @@ func (m *Manager) remove(meta *JobMeta) {
 		return
 	}
 	category := settings.CategoryFolder(meta.Category)
-	jobDir := filepath.Join(root, category, jobFolderName(meta))
+	folderName := buildMediaFolderNameForStrm(meta)
+	jobDir := filepath.Join(root, category, folderName)
 	if jobDir == root || jobDir == "" {
 		return
 	}
@@ -205,7 +206,38 @@ func jobDirectory(meta *JobMeta) string {
 	if meta.FlatLayout {
 		return categoryDir
 	}
-	return filepath.Join(categoryDir, jobFolderName(meta))
+	folderName := buildMediaFolderNameForStrm(meta)
+	return filepath.Join(categoryDir, folderName)
+}
+
+// buildMediaFolderNameForStrm mirrors the download folder naming logic:
+// use title (+year) when available, fall back to basename without extension,
+// and always return a single safe path component.
+func buildMediaFolderNameForStrm(meta *JobMeta) string {
+	if meta == nil {
+		return "job"
+	}
+	cleanTitle := strings.TrimSpace(meta.Title)
+	if cleanTitle != "" {
+		titleExt := filepath.Ext(cleanTitle)
+		if titleExt != "" {
+			cleanTitle = strings.TrimSuffix(cleanTitle, titleExt)
+		}
+		name := sanitizeRelativePath(cleanTitle)
+		if name != "" {
+			return name
+		}
+	}
+	// Fallbacks: try hash or jobID fragments for stability.
+	shortHash := safeFragment(meta.Hash)
+	shortJob := safeFragment(meta.JobID)
+	if shortHash != "" {
+		return shortHash
+	}
+	if shortJob != "" {
+		return shortJob
+	}
+	return "job"
 }
 
 func streamRoot() string {
@@ -351,26 +383,6 @@ func replaceWithStrmExtension(rel string) string {
 		return name
 	}
 	return filepath.Join(dir, name)
-}
-
-func jobFolderName(meta *JobMeta) string {
-	slug := slugify(meta.Title)
-	shortHash := safeFragment(meta.Hash)
-	shortJob := safeFragment(meta.JobID)
-	parts := make([]string, 0, 3)
-	if slug != "" {
-		parts = append(parts, slug)
-	}
-	if shortHash != "" {
-		parts = append(parts, shortHash)
-	}
-	if shortJob != "" {
-		parts = append(parts, shortJob)
-	}
-	if len(parts) == 0 {
-		return "job"
-	}
-	return strings.Join(parts, "-")
 }
 
 func safeFragment(value string) string {

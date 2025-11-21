@@ -148,6 +148,30 @@ func folderTitleWithYear(tor *Torrent, job *DownloadJob) string {
 	return strings.TrimSpace(fmt.Sprintf("%s (%s)", base, year))
 }
 
+// buildMediaFolderName normalizes a human-friendly folder name for media content
+// using job title (with optional year) when available and falling back to a
+// filename without extension. The returned value is a *single* safe path
+// component, never including a file extension.
+func buildMediaFolderName(tor *Torrent, job *DownloadJob, fallbackPath string) string {
+	cleanTitle := strings.TrimSpace(folderTitleWithYear(tor, job))
+	if cleanTitle != "" {
+		// Strip extension if someone accidentally passed a title with it.
+		titleExt := filepath.Ext(cleanTitle)
+		if titleExt != "" {
+			cleanTitle = strings.TrimSuffix(cleanTitle, titleExt)
+		}
+		return sanitizePathComponent(cleanTitle)
+	}
+	// Fallback to basename without extension.
+	baseName := filepath.Base(fallbackPath)
+	ext := filepath.Ext(baseName)
+	nameWithoutExt := strings.TrimSuffix(baseName, ext)
+	if nameWithoutExt == "" {
+		nameWithoutExt = baseName
+	}
+	return sanitizePathComponent(nameWithoutExt)
+}
+
 var (
 	dlManagerOnce sync.Once
 	dlManager     *downloadManager
@@ -436,21 +460,16 @@ func (m *downloadManager) downloadFile(ctx context.Context, tor *Torrent, st *st
 		return fmt.Errorf("file id %d not found", st.Id)
 	}
 
-	// For better integration with Radarr, place downloads into a
-	// folder named after the job title (optionally with detected
-	// year), while keeping the original file name from the torrent.
-	dstPath := ""
-	cleanTitle := strings.TrimSpace(folderTitleWithYear(tor, job))
-	if cleanTitle != "" {
-		folderName := sanitizePathComponent(cleanTitle)
-		fileName := filepath.Base(st.Path)
-		if fileName == "" || fileName == "." || fileName == string(os.PathSeparator) {
-			fileName = sanitizePathComponent(cleanTitle)
-		}
-		dstPath = filepath.Join(root, folderName, fileName)
-	} else {
-		dstPath = filepath.Join(root, st.Path)
+	// Place downloads into a folder named after the job title (with optional year),
+	// or fall back to the basename without extension. Folder name never contains a
+	// file extension; the file keeps its original name with extension.
+	baseName := filepath.Base(st.Path)
+	folderName := buildMediaFolderName(tor, job, st.Path)
+	fileName := baseName
+	if fileName == "" || fileName == "." || fileName == string(os.PathSeparator) {
+		fileName = folderName
 	}
+	dstPath := filepath.Join(root, folderName, fileName)
 	if !strings.HasPrefix(filepath.Clean(dstPath), filepath.Clean(root)) {
 		return fmt.Errorf("invalid path: %s", dstPath)
 	}
