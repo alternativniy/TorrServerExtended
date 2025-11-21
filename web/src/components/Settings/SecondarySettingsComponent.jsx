@@ -39,6 +39,7 @@ export default function SecondarySettingsComponent({ settings, inputForm }) {
     SslCert,
     SslKey,
     MaxDownloadJobs,
+    BlackholeDeleteSourceFiles,
     BlackholeRemoveFiles,
   } = settings || {}
 
@@ -122,6 +123,22 @@ export default function SecondarySettingsComponent({ settings, inputForm }) {
         variant='outlined'
         fullWidth
       />
+      <br />
+      <FormGroup>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={Boolean(BlackholeDeleteSourceFiles)}
+              onChange={inputForm}
+              id='BlackholeDeleteSourceFiles'
+              color='secondary'
+            />
+          }
+          label={t('SettingsDialog.BlackholeDeleteSourceFiles')}
+          labelPlacement='start'
+        />
+        <FormHelperText margin='none'>{t('SettingsDialog.BlackholeDeleteSourceFilesHint')}</FormHelperText>
+      </FormGroup>
       <br />
       <FormGroup>
         <FormControlLabel

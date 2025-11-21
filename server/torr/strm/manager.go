@@ -13,6 +13,7 @@ import (
 
 	"server/log"
 	"server/settings"
+	"server/utils"
 )
 
 type FileMeta struct {
@@ -87,8 +88,15 @@ func (m *Manager) sync(meta *JobMeta) {
 	}
 	baseURL := resolveBaseURL()
 	for _, file := range meta.Files {
+		if !isVideoFile(file.Path) {
+			continue
+		}
 		m.writeStrmFile(meta, file, baseURL, sets.ForceGenerateStrmFiles)
 	}
+}
+
+func isVideoFile(path string) bool {
+	return utils.GetMimeType(path) == "video/*"
 }
 
 func (m *Manager) remove(meta *JobMeta) {

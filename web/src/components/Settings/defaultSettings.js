@@ -10,6 +10,7 @@ export default {
   StreamPath: '',
   GenerateStrmFiles: true,
   ForceGenerateStrmFiles: false,
+  BlackholeDeleteSourceFiles: true,
   BlackholeRemoveFiles: true,
   MaxDownloadJobs: 3,
   ForceEncrypt: false,

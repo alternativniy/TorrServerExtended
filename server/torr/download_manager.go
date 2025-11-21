@@ -62,6 +62,92 @@ type downloadManager struct {
 	slotCond    *sync.Cond
 }
 
+// sanitizePathComponent makes a string safe to use as a single
+// path component (folder or file name) by trimming spaces and
+// replacing path separators with spaces.
+func sanitizePathComponent(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "torrent"
+	}
+	name = strings.ReplaceAll(name, string(os.PathSeparator), " ")
+	// Also guard against alternate separators on Windows-style paths.
+	name = strings.ReplaceAll(name, "\\", " ")
+	return strings.TrimSpace(name)
+}
+
+// extractYear tries to find a plausible release year (19xx or 20xx)
+// in a title-like string. It ignores obvious false positives such as
+// numbers immediately followed by "p" (e.g. 1080p) or by resolution
+// markers.
+func extractYear(s string) string {
+	s = strings.ToLower(s)
+	// Quick reject if there's no "19" or "20" at all.
+	if !strings.Contains(s, "19") && !strings.Contains(s, "20") {
+		return ""
+	}
+	// Simple scan for 4-digit numbers starting with 19 or 20.
+	for i := 0; i+4 <= len(s); i++ {
+		sub := s[i : i+4]
+		if sub < "1900" || sub > "2099" {
+			continue
+		}
+		// Check preceding char (if any) is not a letter or digit.
+		if i > 0 {
+			prev := s[i-1]
+			if (prev >= '0' && prev <= '9') || (prev >= 'a' && prev <= 'z') {
+				continue
+			}
+		}
+		// Check following char to avoid 1080p/2160p style matches.
+		if i+4 < len(s) {
+			next := s[i+4]
+			if next == 'p' || next == 'i' || (next >= '0' && next <= '9') {
+				continue
+			}
+		}
+		return sub
+	}
+	return ""
+}
+
+// folderTitleWithYear builds a folder-friendly title, optionally
+// appending a detected year in parentheses when it looks reasonable.
+func folderTitleWithYear(tor *Torrent, job *DownloadJob) string {
+	base := strings.TrimSpace(job.Title)
+	if base == "" && tor != nil {
+		if tor.Torrent != nil && tor.Torrent.Info() != nil {
+			base = strings.TrimSpace(tor.Torrent.Info().Name)
+		}
+		if base == "" && tor.TorrentSpec != nil {
+			base = strings.TrimSpace(tor.TorrentSpec.DisplayName)
+		}
+	}
+	if base == "" {
+		return ""
+	}
+
+	// Try to find a year in base first, then fall back to torrent names.
+	year := extractYear(base)
+	if year == "" && tor != nil {
+		if tor.Torrent != nil && tor.Torrent.Info() != nil {
+			year = extractYear(tor.Torrent.Info().Name)
+		}
+		if year == "" && tor.TorrentSpec != nil {
+			year = extractYear(tor.TorrentSpec.DisplayName)
+		}
+	}
+
+	if year == "" {
+		return base
+	}
+	// Если год уже явно присутствует в base (например, "(1994)"), не дублируем.
+	if strings.Contains(base, year) {
+		return base
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s (%s)", base, year))
+}
+
 var (
 	dlManagerOnce sync.Once
 	dlManager     *downloadManager
@@ -350,7 +436,21 @@ func (m *downloadManager) downloadFile(ctx context.Context, tor *Torrent, st *st
 		return fmt.Errorf("file id %d not found", st.Id)
 	}
 
-	dstPath := filepath.Join(root, st.Path)
+	// For better integration with Radarr, place downloads into a
+	// folder named after the job title (optionally with detected
+	// year), while keeping the original file name from the torrent.
+	dstPath := ""
+	cleanTitle := strings.TrimSpace(folderTitleWithYear(tor, job))
+	if cleanTitle != "" {
+		folderName := sanitizePathComponent(cleanTitle)
+		fileName := filepath.Base(st.Path)
+		if fileName == "" || fileName == "." || fileName == string(os.PathSeparator) {
+			fileName = sanitizePathComponent(cleanTitle)
+		}
+		dstPath = filepath.Join(root, folderName, fileName)
+	} else {
+		dstPath = filepath.Join(root, st.Path)
+	}
 	if !strings.HasPrefix(filepath.Clean(dstPath), filepath.Clean(root)) {
 		return fmt.Errorf("invalid path: %s", dstPath)
 	}

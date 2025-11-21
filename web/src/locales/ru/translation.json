@@ -188,6 +188,8 @@
     "MaxDownloadJobsHint": "Максимальное число одновременных загрузок",
         "BlackholeRemoveFiles": "Удалять файлы при авто-удалении по blackhole",
         "BlackholeRemoveFilesHint": "Если исходный .torrent/.magnet исчез из дерева blackhole, удалить также и загруженные данные с диска.",
+        "BlackholeDeleteSourceFiles": "Удалять исходные .torrent/.magnet из blackhole",
+        "BlackholeDeleteSourceFilesHint": "После успешного добавления торрента удалить исходный .torrent/.magnet файл из папок blackhole.",
         "DHT": "DHT (Distributed Hash Table)",
         "DisableDHTHint": "Распределенная хэш-таблица - отключите при отсутствии сети после запуска сервера",
         "DisablePEXHint": "Обмен списками участников - не рекомендуется отключать",

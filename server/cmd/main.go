@@ -201,6 +201,12 @@ func processTorrentsRoot(root string) {
 			}
 			if hash != "" {
 				seen[p] = hash
+				// Optionally delete source .torrent/.magnet file after successful processing
+				if settings.BTsets != nil && settings.BTsets.BlackholeDeleteSourceFiles {
+					if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+						log.TLogln("Error removing blackhole source file:", err)
+					}
+				}
 			}
 		}
 		return nil

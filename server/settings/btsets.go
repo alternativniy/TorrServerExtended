@@ -67,7 +67,8 @@ type BTSets struct {
 	ForceGenerateStrmFiles bool
 
 	// Blackhole / auto-removal
-	BlackholeRemoveFiles bool // remove downloaded files on auto-removal (not just STRM)
+	BlackholeRemoveFiles       bool // remove downloaded files on auto-removal (not just STRM)
+	BlackholeDeleteSourceFiles bool // delete source .torrent/.magnet files from blackhole on successful import
 }
 
 func (v *BTSets) String() string {
@@ -112,6 +113,10 @@ func SetBTSets(sets *BTSets) {
 	// default: when blackhole is used, also remove files from disk on auto-removal
 	if !sets.BlackholeRemoveFiles {
 		sets.BlackholeRemoveFiles = true
+	}
+	// default: delete source .torrent/.magnet files from blackhole after successful processing
+	if !sets.BlackholeDeleteSourceFiles {
+		sets.BlackholeDeleteSourceFiles = true
 	}
 
 	normalizeBTSets(sets)
