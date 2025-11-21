@@ -1,5 +1,5 @@
 <p align="center" style="text-align: center">
-  <img src="https://github.com/alternativniy/TorrServerExtended/assets/144587546/53f7175a-cda4-4a06-86b6-2ac07582dcf1" width="33%"><br/>
+  <img src="https://github.com/YouROK/TorrServer/assets/144587546/53f7175a-cda4-4a06-86b6-2ac07582dcf1" width="33%"><br/>
 </p>
 
 <p align="center">
