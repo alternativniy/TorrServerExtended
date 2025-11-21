@@ -258,9 +258,11 @@ func processTorrentFile(root, fullPath string) string {
 		if err != nil {
 			log.TLogln("Error create download job:", err)
 		}
+	} else {
+		// Для stream‑режима можем сразу освободить торрент.
+		defer tor.Drop()
 	}
 	hash := tor.Hash().HexString()
-	tor.Drop()
 	return hash
 }
 
@@ -315,11 +317,11 @@ func processMagnetFile(root, fullPath string) string {
 		if err != nil {
 			log.TLogln("Error create download job from magnet:", err)
 		}
+	} else if tor != nil {
+		// В stream‑режиме не держим торрент дольше необходимого.
+		defer tor.Drop()
 	}
 	hash := tor.Hash().HexString()
-	if tor != nil {
-		tor.Drop()
-	}
 	return hash
 }
 
