@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"server/settings"
 	"strings"
+	"unicode"
 )
 
 // SanitizePathComponent makes a string safe to use as a single
@@ -66,10 +67,54 @@ func NormalizeReleaseName(name string) string {
 	if ext != "" {
 		name = strings.TrimSuffix(name, ext)
 	}
+	name = stripBracketedSegments(name)
 	replacer := strings.NewReplacer(".", " ", "_", " ")
 	name = replacer.Replace(name)
-	fields := strings.Fields(name)
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+		case unicode.IsSpace(r):
+			b.WriteRune(' ')
+		default:
+			b.WriteRune(' ')
+		}
+	}
+	fields := strings.Fields(b.String())
 	return strings.Join(fields, " ")
+}
+
+func stripBracketedSegments(input string) string {
+	var b strings.Builder
+	squareDepth := 0
+	roundDepth := 0
+	for _, r := range input {
+		switch r {
+		case '[':
+			squareDepth++
+			continue
+		case ']':
+			if squareDepth > 0 {
+				squareDepth--
+			}
+			continue
+		case '(':
+			roundDepth++
+			continue
+		case ')':
+			if roundDepth > 0 {
+				roundDepth--
+			}
+			continue
+		}
+		if squareDepth > 0 || roundDepth > 0 {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // ParseTitleAndYearFromFilename tries to extract a human-friendly English title
@@ -88,7 +133,11 @@ func ParseTitleAndYearFromFilename(filename string) (string, string) {
 		"web-dl": {}, "webrip": {}, "web": {},
 		"bdrip": {}, "bdremux": {}, "brrip": {}, "bluray": {}, "bdrip-": {}, "hdrip": {}, "hdr": {},
 		"hdtv": {}, "dvdrip": {}, "dvd": {},
-		"x264": {}, "h264": {}, "x265": {}, "hevc": {}, "avc": {},
+		"x264": {}, "h264": {}, "x265": {}, "hevc": {}, "avc": {}, "mvo": {},
+		"3x": {}, "avo": {}, "original": {}, "sub": {}, "dub": {},
+		"dl": {}, "hd": {}, "sd": {},
+		"ac3": {}, "dts": {}, "dd5": {}, "dtshd": {}, "truehd": {},
+		"hdr10": {},
 		"10bit": {}, "8bit": {},
 		"remastered": {}, "extended": {}, "unrated": {}, "director's": {}, "directors": {},
 		"cut": {}, "proper": {}, "repack": {},
@@ -103,21 +152,34 @@ func ParseTitleAndYearFromFilename(filename string) (string, string) {
 	year := ExtractYear(clean)
 
 	trimIdx := len(parts)
-	for i := len(parts) - 1; i >= 0; i-- {
-		p := strings.ToLower(parts[i])
+	for i, part := range parts {
+		p := strings.ToLower(part)
 		if p == year {
 			trimIdx = i
-			continue
+			break
 		}
 		if strings.HasPrefix(p, "[") || strings.HasSuffix(p, "]") {
 			trimIdx = i
-			continue
+			break
 		}
 		if _, ok := knownTrash[p]; ok {
 			trimIdx = i
-			continue
+			break
 		}
-		break
+	}
+	if trimIdx == len(parts) {
+		for i := len(parts) - 1; i >= 0; i-- {
+			p := strings.ToLower(parts[i])
+			if p == year || strings.HasPrefix(p, "[") || strings.HasSuffix(p, "]") {
+				trimIdx = i
+				continue
+			}
+			if _, ok := knownTrash[p]; ok {
+				trimIdx = i
+				continue
+			}
+			break
+		}
 	}
 	if trimIdx <= 0 {
 		trimIdx = len(parts)
