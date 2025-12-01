@@ -10,13 +10,11 @@ import (
 
 	"server/log"
 	"server/settings"
-	"server/torr"
 	"server/web"
 )
 
 func Start(port, ip, sslport, sslCert, sslKey string, sslEnabled, roSets, searchWA bool, tgtoken string) {
 	settings.InitSets(roSets, searchWA)
-	torr.RestoreLibraryStrm()
 	// https checks
 	if sslEnabled {
 		// set settings ssl enabled

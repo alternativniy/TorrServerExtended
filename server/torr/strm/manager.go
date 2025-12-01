@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unicode"
 
 	"server/log"
 	"server/settings"
@@ -29,7 +28,6 @@ type JobMeta struct {
 	Category   string
 	TargetPath string
 	Files      []FileMeta
-	FlatLayout bool
 }
 
 var (
@@ -103,10 +101,6 @@ func (m *Manager) remove(meta *JobMeta) {
 	if meta == nil {
 		return
 	}
-	if meta.FlatLayout {
-		m.removeFlat(meta)
-		return
-	}
 	sets := settings.BTsets
 	if sets == nil {
 		return
@@ -115,9 +109,12 @@ func (m *Manager) remove(meta *JobMeta) {
 	if root == "" {
 		return
 	}
-	category := settings.CategoryFolder(meta.Category)
-	folderName := buildMediaFolderNameForStrm(meta)
-	jobDir := filepath.Join(root, category, folderName)
+
+	if meta.Title == "" {
+		return
+	}
+
+	jobDir := utils.BuildMediaFolderName("stream", meta.Category, meta.Title)
 	if jobDir == root || jobDir == "" {
 		return
 	}
@@ -175,8 +172,16 @@ func BuildContent(meta *JobMeta, file FileMeta, baseURL string) (string, bool) {
 	return streamURL(baseURL, meta.Hash, file.ID, filepath.Base(file.Path)), false
 }
 
-func JobDirectory(meta *JobMeta) string {
-	return jobDirectory(meta)
+func jobDirectory(meta *JobMeta) string {
+	if meta == nil {
+		return ""
+	}
+	root := streamRoot()
+	if root == "" {
+		return ""
+	}
+	jobDir := utils.BuildMediaFolderName("stream", meta.Category, meta.Title)
+	return jobDir
 }
 
 func FilePath(meta *JobMeta, file FileMeta) string {
@@ -191,53 +196,13 @@ func FilePath(meta *JobMeta, file FileMeta) string {
 	if rel == "" {
 		return ""
 	}
-	return filepath.Join(dir, replaceWithStrmExtension(rel))
-}
 
-func jobDirectory(meta *JobMeta) string {
-	if meta == nil {
-		return ""
+	base := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel)) + ".strm"
+	subdir := filepath.Dir(rel)
+	if subdir == "." || subdir == string(os.PathSeparator) {
+		return filepath.Join(dir, base)
 	}
-	root := streamRoot()
-	if root == "" {
-		return ""
-	}
-	categoryDir := filepath.Join(root, settings.CategoryFolder(meta.Category))
-	if meta.FlatLayout {
-		return categoryDir
-	}
-	folderName := buildMediaFolderNameForStrm(meta)
-	return filepath.Join(categoryDir, folderName)
-}
-
-// buildMediaFolderNameForStrm mirrors the download folder naming logic:
-// use title (+year) when available, fall back to basename without extension,
-// and always return a single safe path component.
-func buildMediaFolderNameForStrm(meta *JobMeta) string {
-	if meta == nil {
-		return "job"
-	}
-	cleanTitle := strings.TrimSpace(meta.Title)
-	if cleanTitle != "" {
-		titleExt := filepath.Ext(cleanTitle)
-		if titleExt != "" {
-			cleanTitle = strings.TrimSuffix(cleanTitle, titleExt)
-		}
-		name := sanitizeRelativePath(cleanTitle)
-		if name != "" {
-			return name
-		}
-	}
-	// Fallbacks: try hash or jobID fragments for stability.
-	shortHash := safeFragment(meta.Hash)
-	shortJob := safeFragment(meta.JobID)
-	if shortHash != "" {
-		return shortHash
-	}
-	if shortJob != "" {
-		return shortJob
-	}
-	return "job"
+	return filepath.Join(dir, subdir, base)
 }
 
 func streamRoot() string {
@@ -254,22 +219,6 @@ func (m *Manager) removeFile(path string) {
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.TLogln("strm: remove file", err)
-	}
-}
-
-func (m *Manager) removeFlat(meta *JobMeta) {
-	if len(meta.Files) == 0 {
-		return
-	}
-	base := jobDirectory(meta)
-	stop := filepath.Clean(base)
-	for _, file := range meta.Files {
-		path := FilePath(meta, file)
-		if path == "" {
-			continue
-		}
-		m.removeFile(path)
-		cleanupEmptyStrmDirs(filepath.Dir(path), stop)
 	}
 }
 
@@ -344,24 +293,6 @@ func streamURL(base, hash string, index int, name string) string {
 	return fmt.Sprintf("%s/stream/%s?link=%s&index=%d&play", safeBase, escapedName, strings.ToLower(hash), index)
 }
 
-func cleanupEmptyStrmDirs(current, stop string) {
-	stop = filepath.Clean(stop)
-	if stop == "" {
-		return
-	}
-	trimmedStop := stop + string(os.PathSeparator)
-	for current != stop && strings.HasPrefix(current, trimmedStop) {
-		entries, err := os.ReadDir(current)
-		if err != nil || len(entries) > 0 {
-			return
-		}
-		if err := os.Remove(current); err != nil {
-			return
-		}
-		current = filepath.Dir(current)
-	}
-}
-
 func sanitizeRelativePath(rel string) string {
 	clean := filepath.Clean(strings.TrimSpace(rel))
 	clean = strings.TrimPrefix(clean, "..")
@@ -372,50 +303,6 @@ func sanitizeRelativePath(rel string) string {
 	clean = strings.ReplaceAll(clean, "\\", string(os.PathSeparator))
 	clean = strings.TrimLeft(clean, string(os.PathSeparator))
 	return clean
-}
-
-func replaceWithStrmExtension(rel string) string {
-	dir := filepath.Dir(rel)
-	base := filepath.Base(rel)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext) + ".strm"
-	if dir == "." {
-		return name
-	}
-	return filepath.Join(dir, name)
-}
-
-func safeFragment(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) == 0 {
-		return ""
-	}
-	if len(value) > 8 {
-		value = value[:8]
-	}
-	return strings.ToLower(value)
-}
-
-func slugify(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(unicode.ToLower(r))
-			lastDash = false
-		case unicode.IsSpace(r) || r == '-' || r == '_':
-			if !lastDash {
-				b.WriteRune('-')
-				lastDash = true
-			}
-		}
-	}
-	return strings.Trim(b.String(), "-")
 }
 
 func resolveBaseURL() string {

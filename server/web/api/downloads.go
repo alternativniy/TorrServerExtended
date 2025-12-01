@@ -37,7 +37,14 @@ func downloadCreate(c *gin.Context) {
 		return
 	}
 
-	job, err := torr.CreateDownloadJob(spec, req.Title, req.Poster, req.Data, req.Category, req.Files, req.TargetPath)
+	hash := spec.InfoHash.HexString()
+	tor := torr.GetTorrent(hash)
+	if tor == nil {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "torrent not found", "hash": hash})
+		return
+	}
+
+	job, err := torr.CreateDownloadJobForTorrent(tor, req.Title, req.Files)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -75,7 +82,7 @@ func downloadDelete(c *gin.Context) {
 	deleteFiles, _ := strconv.ParseBool(c.DefaultQuery("remove_files", "false"))
 
 	canceled := torr.CancelDownloadJob(id)
-	removed := torr.RemoveDownloadJob(id, deleteFiles)
+	removed := torr.RemoveDownloadJob(id, deleteFiles, false)
 	if !removed && !canceled {
 		c.AbortWithStatus(http.StatusNotFound)
 		return

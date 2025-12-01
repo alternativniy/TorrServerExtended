@@ -15,8 +15,9 @@ import (
 	"server/log"
 	"server/settings"
 	"server/torr"
+	"server/utils"
 	"server/version"
-	utils "server/web/api/utils"
+	apiutils "server/web/api/utils"
 
 	"github.com/alexflint/go-arg"
 	"github.com/anacrolix/torrent"
@@ -242,7 +243,16 @@ func processTorrentFile(root, fullPath string) string {
 	title := ""
 	poster := ""
 	data := ""
-	tor, err := torr.AddTorrent(sp, title, poster, data, category)
+	// Try to extract a better English title and year from the source filename
+	// and persist it in DB so all further jobs/STRM reuse the same value.
+	baseName := filepath.Base(fullPath)
+	if engTitle, year := utils.ParseTitleAndYearFromFilename(baseName); engTitle != "" {
+		title = engTitle
+		if year != "" && !strings.Contains(engTitle, year) {
+			title = fmt.Sprintf("%s (%s)", engTitle, year)
+		}
+	}
+	tor, err := torr.AddTorrent(sp, strings.TrimSpace(title), poster, data, category, mode == "download")
 	if err != nil {
 		log.TLogln("Error add torrent from file:", err)
 		return ""
@@ -251,23 +261,7 @@ func processTorrentFile(root, fullPath string) string {
 		log.TLogln("Error get info from torrent")
 		return ""
 	}
-	if tor.Title == "" {
-		if tor.Name() != "" {
-			tor.Title = tor.Name()
-		} else if sp.DisplayName != "" {
-			tor.Title = sp.DisplayName
-		}
-	}
 	torr.SaveTorrentToDB(tor)
-	if mode == "download" {
-		_, err = torr.CreateDownloadJobForTorrent(tor, tor.Title, nil, "")
-		if err != nil {
-			log.TLogln("Error create download job:", err)
-		}
-	} else {
-		// Для stream‑режима можем сразу освободить торрент.
-		defer tor.Drop()
-	}
 	hash := tor.Hash().HexString()
 	return hash
 }
@@ -286,8 +280,17 @@ func processMagnetFile(root, fullPath string) string {
 	title := ""
 	poster := ""
 	data := ""
+	// Попробуем вытащить английский тайтл и год из имени .magnet файла
+	// и сразу сохранить его в таком виде в DB.
+	baseName := filepath.Base(fullPath)
+	if engTitle, year := utils.ParseTitleAndYearFromFilename(baseName); engTitle != "" {
+		title = engTitle
+		if year != "" && !strings.Contains(engTitle, year) {
+			title = fmt.Sprintf("%s (%s)", engTitle, year)
+		}
+	}
 	// Reuse existing magnet parsing logic from web/api/utils
-	sp, err := utils.ParseLink(link)
+	sp, err := apiutils.ParseLink(link)
 	if err != nil {
 		log.TLogln("Error parse magnet link:", err)
 		return ""
@@ -297,7 +300,7 @@ func processMagnetFile(root, fullPath string) string {
 		// Magnet already tracked; just return its hash without logging.
 		return existing.Hash().HexString()
 	}
-	tor, err := torr.AddTorrent(sp, title, poster, data, category)
+	tor, err := torr.AddTorrent(sp, strings.TrimSpace(title), poster, data, category, mode == "download")
 	if err != nil {
 		log.TLogln("Error add magnet torrent:", err)
 		return ""
@@ -318,15 +321,6 @@ func processMagnetFile(root, fullPath string) string {
 		}
 	}
 	torr.SaveTorrentToDB(tor)
-	if mode == "download" {
-		_, err = torr.CreateDownloadJobForTorrent(tor, tor.Title, nil, "")
-		if err != nil {
-			log.TLogln("Error create download job from magnet:", err)
-		}
-	} else if tor != nil {
-		// В stream‑режиме не держим торрент дольше необходимого.
-		defer tor.Drop()
-	}
 	hash := tor.Hash().HexString()
 	return hash
 }

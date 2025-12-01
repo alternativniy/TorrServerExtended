@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -38,7 +39,7 @@ func LoadTorrent(tor *Torrent) *Torrent {
 	return tr
 }
 
-func AddTorrent(spec *torrent.TorrentSpec, title, poster string, data string, category string) (*Torrent, error) {
+func AddTorrent(spec *torrent.TorrentSpec, title, poster string, data string, category string, download bool) (*Torrent, error) {
 	torr, err := NewTorrent(spec, bts)
 	if err != nil {
 		log.TLogln("error add torrent:", err)
@@ -47,14 +48,22 @@ func AddTorrent(spec *torrent.TorrentSpec, title, poster string, data string, ca
 
 	torDB := GetTorrentDB(spec.InfoHash)
 
-	if torr.Title == "" {
+	// Prefer explicitly provided title (e.g. from filename/magnet)
+	// and persist it in DB so all future jobs/STRM use the same name.
+	if title != "" {
+		title = strings.TrimSpace(title)
+	}
+	if title == "" && torr.Title != "" {
+		title = strings.TrimSpace(torr.Title)
+	}
+	if title == "" && torDB != nil && torDB.Title != "" {
+		title = strings.TrimSpace(torDB.Title)
+	}
+	if title == "" && torr.Torrent != nil && torr.Torrent.Info() != nil {
+		title = strings.TrimSpace(torr.Info().Name)
+	}
+	if title != "" {
 		torr.Title = title
-		if title == "" && torDB != nil {
-			torr.Title = torDB.Title
-		}
-		if torr.Title == "" && torr.Torrent != nil && torr.Torrent.Info() != nil {
-			torr.Title = torr.Info().Name
-		}
 	}
 
 	if torr.Category == "" {
@@ -77,6 +86,17 @@ func AddTorrent(spec *torrent.TorrentSpec, title, poster string, data string, ca
 			torr.Data = torDB.Data
 		}
 	}
+
+	if download {
+		if _, err := CreateDownloadJobForTorrent(torr, title, nil); err != nil {
+			log.TLogln("error queue torrent download:", err)
+		}
+	}
+
+	if !download || sets.BTsets.ForceGenerateStrmFiles {
+		CreateOrUpdateStrmJobForTorrent(torr)
+	}
+
 	return torr, nil
 }
 
@@ -111,6 +131,7 @@ func SetTorrent(hashHex, title, poster, category string, data string) *Torrent {
 	torr := bts.GetTorrent(hash)
 	torrDb := GetTorrentDB(hash)
 
+	title = strings.TrimSpace(title)
 	if title == "" && torr == nil && torrDb != nil {
 		torr = GetTorrent(hashHex)
 		torr.GotInfo()
@@ -156,7 +177,7 @@ func RemTorrent(hashHex string, deleteFiles bool) {
 		return
 	}
 	hash := metainfo.NewHashFromHex(hashHex)
-	RemoveDownloadJobsByHash(hashHex, deleteFiles)
+	RemoveDownloadJobsByHash(hashHex, deleteFiles, true)
 	removeLibraryStrm(hashHex)
 	if bts.RemoveTorrent(hash) {
 		if sets.BTsets.UseDisk && hashHex != "" && hashHex != "/" {
@@ -212,7 +233,6 @@ func SetSettings(set *sets.BTSets) {
 	}
 	sets.SetBTSets(set)
 	UpdateDownloadSettings()
-	RestoreLibraryStrm()
 	log.TLogln("drop all torrents")
 	dropAllTorrent()
 	time.Sleep(time.Second * 1)
@@ -231,7 +251,6 @@ func SetDefSettings() {
 	}
 	sets.SetDefaultConfig()
 	UpdateDownloadSettings()
-	RestoreLibraryStrm()
 	log.TLogln("drop all torrents")
 	dropAllTorrent()
 	time.Sleep(time.Second * 1)

@@ -4,11 +4,12 @@ import (
 	"errors"
 	"strings"
 
-	tele "gopkg.in/telebot.v4"
 	"server/log"
 	set "server/settings"
 	"server/torr"
 	"server/web/api/utils"
+
+	tele "gopkg.in/telebot.v4"
 )
 
 func addTorrent(c tele.Context, link string) error {
@@ -24,7 +25,7 @@ func addTorrent(c tele.Context, link string) error {
 		return err
 	}
 
-	tor, err := torr.AddTorrent(torrSpec, "", "", "", "")
+	tor, err := torr.AddTorrent(torrSpec, "", "", "", "", false)
 
 	if tor.Data != "" && set.BTsets.EnableDebug {
 		log.TLogln("torrent data:", tor.Data)

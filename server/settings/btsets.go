@@ -162,6 +162,7 @@ func SetDefaultConfig() {
 	sets.ReaderReadAHead = 95 // 95%
 	sets.MaxDownloadJobs = 3
 	sets.BlackholeRemoveFiles = true
+	sets.BlackholeDeleteSourceFiles = true
 	normalizeBTSets(sets)
 	BTsets = sets
 	ensureDataDirectories(BTsets)

@@ -116,9 +116,6 @@ func (t *Torrent) WaitInfo() bool {
 
 	select {
 	case <-t.Torrent.GotInfo():
-		// К этому моменту anacrolix уже должен был создать Cache через Storage.OpenTorrent.
-		// Если по какой-то причине кэша нет, не считаем это фатальной ошибкой для GotInfo:
-		// торрент всё равно переходит в рабочее состояние, просто без привязанного Cache.
 		if t.bt != nil && t.bt.storage != nil {
 			if c := t.bt.storage.GetCache(t.Hash()); c != nil {
 				t.cache = c
@@ -204,6 +201,7 @@ func (t *Torrent) progressEvent() {
 		t.DownloadSpeed = 0
 		t.UploadSpeed = 0
 	}
+
 	t.muTorrent.Unlock()
 
 	t.lastTimeSpeed = time.Now()
@@ -232,9 +230,6 @@ func (t *Torrent) updateRA() {
 }
 
 func (t *Torrent) expired() bool {
-	if t.cache == nil {
-		return t.expiredTime.Before(time.Now()) && (t.Stat == state.TorrentWorking || t.Stat == state.TorrentClosed)
-	}
 	return t.cache.Readers() == 0 && t.expiredTime.Before(time.Now()) && (t.Stat == state.TorrentWorking || t.Stat == state.TorrentClosed)
 }
 
@@ -372,13 +367,20 @@ func (t *Torrent) Status() *state.TorrentStatus {
 		}
 	}
 
-	if st.Hash != "" {
-		if downloads := ListDownloadStatusesByHash(st.Hash); len(downloads) > 0 {
-			st.Downloads = downloads
-		}
+	if downloads := t.GetDownloads(); len(downloads) > 0 {
+		st.Downloads = downloads
 	}
 
 	return st
+}
+
+func (t *Torrent) GetDownloads() []*state.TorrentDownloadStatus {
+	hash := ""
+
+	if t.TorrentSpec != nil {
+		hash = t.TorrentSpec.InfoHash.HexString()
+	}
+	return ListDownloadStatusesByHash(hash)
 }
 
 func (t *Torrent) CacheState() *cacheSt.CacheState {

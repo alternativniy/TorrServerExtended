@@ -18,7 +18,8 @@ import (
 	"server/log"
 	"server/settings"
 	"server/torr/state"
-	"server/torr/strm"
+	"server/utils"
+	// "server/torr/strm"
 )
 
 type DownloadStatus string
@@ -60,116 +61,6 @@ type downloadManager struct {
 	maxParallel int
 	active      int
 	slotCond    *sync.Cond
-}
-
-// sanitizePathComponent makes a string safe to use as a single
-// path component (folder or file name) by trimming spaces and
-// replacing path separators with spaces.
-func sanitizePathComponent(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "torrent"
-	}
-	name = strings.ReplaceAll(name, string(os.PathSeparator), " ")
-	// Also guard against alternate separators on Windows-style paths.
-	name = strings.ReplaceAll(name, "\\", " ")
-	return strings.TrimSpace(name)
-}
-
-// extractYear tries to find a plausible release year (19xx or 20xx)
-// in a title-like string. It ignores obvious false positives such as
-// numbers immediately followed by "p" (e.g. 1080p) or by resolution
-// markers.
-func extractYear(s string) string {
-	s = strings.ToLower(s)
-	// Quick reject if there's no "19" or "20" at all.
-	if !strings.Contains(s, "19") && !strings.Contains(s, "20") {
-		return ""
-	}
-	// Simple scan for 4-digit numbers starting with 19 or 20.
-	for i := 0; i+4 <= len(s); i++ {
-		sub := s[i : i+4]
-		if sub < "1900" || sub > "2099" {
-			continue
-		}
-		// Check preceding char (if any) is not a letter or digit.
-		if i > 0 {
-			prev := s[i-1]
-			if (prev >= '0' && prev <= '9') || (prev >= 'a' && prev <= 'z') {
-				continue
-			}
-		}
-		// Check following char to avoid 1080p/2160p style matches.
-		if i+4 < len(s) {
-			next := s[i+4]
-			if next == 'p' || next == 'i' || (next >= '0' && next <= '9') {
-				continue
-			}
-		}
-		return sub
-	}
-	return ""
-}
-
-// folderTitleWithYear builds a folder-friendly title, optionally
-// appending a detected year in parentheses when it looks reasonable.
-func folderTitleWithYear(tor *Torrent, job *DownloadJob) string {
-	base := strings.TrimSpace(job.Title)
-	if base == "" && tor != nil {
-		if tor.Torrent != nil && tor.Torrent.Info() != nil {
-			base = strings.TrimSpace(tor.Torrent.Info().Name)
-		}
-		if base == "" && tor.TorrentSpec != nil {
-			base = strings.TrimSpace(tor.TorrentSpec.DisplayName)
-		}
-	}
-	if base == "" {
-		return ""
-	}
-
-	// Try to find a year in base first, then fall back to torrent names.
-	year := extractYear(base)
-	if year == "" && tor != nil {
-		if tor.Torrent != nil && tor.Torrent.Info() != nil {
-			year = extractYear(tor.Torrent.Info().Name)
-		}
-		if year == "" && tor.TorrentSpec != nil {
-			year = extractYear(tor.TorrentSpec.DisplayName)
-		}
-	}
-
-	if year == "" {
-		return base
-	}
-	// Если год уже явно присутствует в base (например, "(1994)"), не дублируем.
-	if strings.Contains(base, year) {
-		return base
-	}
-	return strings.TrimSpace(fmt.Sprintf("%s (%s)", base, year))
-}
-
-// buildMediaFolderName normalizes a human-friendly folder name for media content
-// using job title (with optional year) when available and falling back to a
-// filename without extension. The returned value is a *single* safe path
-// component, never including a file extension.
-func buildMediaFolderName(tor *Torrent, job *DownloadJob, fallbackPath string) string {
-	cleanTitle := strings.TrimSpace(folderTitleWithYear(tor, job))
-	if cleanTitle != "" {
-		// Strip extension if someone accidentally passed a title with it.
-		titleExt := filepath.Ext(cleanTitle)
-		if titleExt != "" {
-			cleanTitle = strings.TrimSuffix(cleanTitle, titleExt)
-		}
-		return sanitizePathComponent(cleanTitle)
-	}
-	// Fallback to basename without extension.
-	baseName := filepath.Base(fallbackPath)
-	ext := filepath.Ext(baseName)
-	nameWithoutExt := strings.TrimSuffix(baseName, ext)
-	if nameWithoutExt == "" {
-		nameWithoutExt = baseName
-	}
-	return sanitizePathComponent(nameWithoutExt)
 }
 
 var (
@@ -248,7 +139,6 @@ func (m *downloadManager) restoreJobs() {
 		}
 
 		m.jobs[job.ID] = job
-		go m.syncStrm(job)
 		if job.Status == DownloadStatusPending {
 			go m.tryStart(job)
 		}
@@ -294,6 +184,9 @@ func (m *downloadManager) enqueue(job *DownloadJob) {
 }
 
 func (m *downloadManager) tryStart(job *DownloadJob) {
+	if job != nil {
+		log.TLogln("download tryStart: job", job.ID, "hash", job.Hash, "target", job.TargetPath, "status", job.Status)
+	}
 	// Acquire a slot respecting maxParallel limit.
 	m.mu.Lock()
 	for m.active >= m.maxParallel {
@@ -325,12 +218,8 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 	})
 	m.persist(job)
 
-	m.handleStrmOnStart(job)
-
 	err := m.executeJob(ctx, job)
 
-	// Clear cancel and update status based on result.
-	var completed bool
 	withJobLock(job, func(j *DownloadJob) struct{} {
 		j.cancel = nil
 		if err != nil {
@@ -349,17 +238,12 @@ func (m *downloadManager) tryStart(job *DownloadJob) {
 		} else {
 			j.Status = DownloadStatusDone
 			j.Error = ""
-			completed = true
 		}
 		j.pauseRequested = false
 		j.UpdatedAt = time.Now()
 		return struct{}{}
 	})
 	m.persist(job)
-
-	if completed {
-		go m.syncStrm(job)
-	}
 }
 
 func (m *downloadManager) executeJob(ctx context.Context, job *DownloadJob) error {
@@ -460,17 +344,13 @@ func (m *downloadManager) downloadFile(ctx context.Context, tor *Torrent, st *st
 		return fmt.Errorf("file id %d not found", st.Id)
 	}
 
-	// Place downloads into a folder named after the job title (with optional year),
-	// or fall back to the basename without extension. Folder name never contains a
-	// file extension; the file keeps its original name with extension.
-	baseName := filepath.Base(st.Path)
-	folderName := buildMediaFolderName(tor, job, st.Path)
-	fileName := baseName
-	if fileName == "" || fileName == "." || fileName == string(os.PathSeparator) {
-		fileName = folderName
+	// Place downloads under job.TargetPath using the torrent's relative file path.
+	relPath := filepath.Clean(filepath.FromSlash(st.Path))
+	if relPath == "." || relPath == string(os.PathSeparator) || relPath == "" {
+		return fmt.Errorf("invalid file path in torrent metadata: %q", st.Path)
 	}
-	dstPath := filepath.Join(root, folderName, fileName)
-	if !strings.HasPrefix(filepath.Clean(dstPath), filepath.Clean(root)) {
+	dstPath := filepath.Join(root, relPath)
+	if !strings.HasPrefix(filepath.Clean(dstPath), filepath.Clean(root)+string(os.PathSeparator)) && filepath.Clean(dstPath) != filepath.Clean(root) {
 		return fmt.Errorf("invalid path: %s", dstPath)
 	}
 
@@ -616,29 +496,14 @@ func (m *downloadManager) cancelJob(id string) bool {
 	return true
 }
 
-func (m *downloadManager) removeJob(id string, deleteFiles bool) bool {
+func (m *downloadManager) removeJob(id string, deleteFiles bool, fullRemove bool) bool {
 	m.mu.Lock()
 	job, ok := m.jobs[id]
 	if !ok {
 		m.mu.Unlock()
 		return false
 	}
-	sets := settings.BTsets
-	restoreJobStrm := sets != nil && sets.ForceGenerateStrmFiles
-	restoreLibraryStrm := sets != nil && (sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles)
-	var metaWithFiles *strm.JobMeta
-	if restoreJobStrm {
-		if m.ensureFileMetas(job) {
-			metaWithFiles = buildStrmMeta(job, true)
-		} else {
-			restoreJobStrm = false
-		}
-	}
-	meta := metaWithFiles
-	if meta == nil {
-		meta = buildStrmMeta(job, false)
-	}
-	hash := strings.TrimSpace(job.Hash)
+
 	withJobLock(job, func(j *DownloadJob) struct{} {
 		if j.Status != DownloadStatusDone && j.Status != DownloadStatusFailed && j.Status != DownloadStatusCanceled {
 			j.Status = DownloadStatusCanceled
@@ -651,27 +516,18 @@ func (m *downloadManager) removeJob(id string, deleteFiles bool) bool {
 	delete(m.jobs, id)
 	m.mu.Unlock()
 
-	m.persist(job)
-	if meta != nil {
-		strm.RemoveJob(meta)
-	}
-	if restoreJobStrm && metaWithFiles != nil {
-		go strm.SyncJob(metaWithFiles)
-	}
+	// m.persist(job)
 
 	if deleteFiles && job != nil {
 		if err := job.cleanupTargetPath(); err != nil {
 			log.TLogln("download cleanup failed", err)
 		}
 	}
-	if restoreLibraryStrm && hash != "" {
-		go func(h string) {
-			if tor := findTorrentByHash(h); tor != nil {
-				syncLibraryStrm(tor)
-			}
-		}(hash)
-	}
+
 	settings.RemoveDownloadJob(id)
+	if !fullRemove {
+		CreateOrUpdateStrmJobForTorrentByHash(job.Hash)
+	}
 	return true
 }
 
@@ -749,7 +605,7 @@ func (m *downloadManager) resumeJob(id string) error {
 	return nil
 }
 
-func (m *downloadManager) removeJobsByHash(hash string, deleteFiles bool) int {
+func (m *downloadManager) removeJobsByHash(hash string, deleteFiles bool, fullRemove bool) int {
 	norm := strings.ToLower(strings.TrimSpace(hash))
 	if norm == "" {
 		return 0
@@ -767,7 +623,7 @@ func (m *downloadManager) removeJobsByHash(hash string, deleteFiles bool) int {
 		if job.Status == DownloadStatusRunning {
 			m.cancelJob(job.ID)
 		}
-		if m.removeJob(job.ID, deleteFiles) {
+		if m.removeJob(job.ID, deleteFiles, fullRemove) {
 			count++
 		}
 	}
@@ -793,15 +649,6 @@ func (m *downloadManager) getJob(id string) *DownloadJob {
 	}
 	return nil
 }
-
-// func (job *DownloadJob) updateStatus(status DownloadStatus, errMsg string) {
-// 	withJobLock(job, func(j *DownloadJob) struct{} {
-// 		j.Status = status
-// 		j.Error = errMsg
-// 		j.UpdatedAt = time.Now()
-// 		return struct{}{}
-// 	})
-// }
 
 func (job *DownloadJob) addProgress(n int64) bool {
 	return withJobLock(job, func(j *DownloadJob) bool {
@@ -935,87 +782,17 @@ func (job *DownloadJob) clone() *DownloadJob {
 func (job *DownloadJob) cleanupTargetPath() error {
 	base := filepath.Clean(job.TargetPath)
 	if base == "" || base == string(os.PathSeparator) || base == "." {
+		log.TLogln("download cleanup: unsafe base path, skipping", base)
 		return fmt.Errorf("refusing to remove unsafe path: %s", base)
 	}
-	paths := job.recordedOutputPaths()
-	if len(paths) == 0 {
-		return fmt.Errorf("no recorded download paths for job %s", job.ID)
+	log.TLogln("download cleanup: removing folder", base)
+	// delete everything under TargetPath, including the folder itself
+	if err := os.RemoveAll(base); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.TLogln("download cleanup: RemoveAll failed", base, err)
+		return fmt.Errorf("failed to remove download folder %s: %w", base, err)
 	}
-	var errs []string
-	for _, rel := range paths {
-		rel = strings.TrimSpace(rel)
-		if rel == "" {
-			continue
-		}
-		relPath := filepath.Clean(filepath.FromSlash(rel))
-		full := filepath.Join(base, relPath)
-		if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
-			continue
-		}
-		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err.Error())
-		}
-		if err := os.Remove(full + ".part"); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err.Error())
-		}
-		cleanupEmptyParents(filepath.Dir(full), base)
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("cleanup errors: %s", strings.Join(errs, "; "))
-	}
+	log.TLogln("download cleanup: RemoveAll completed", base)
 	return nil
-}
-
-func (job *DownloadJob) recordedOutputPaths() []string {
-	var paths []string
-	var metas []settings.DownloadFileMeta
-	withJobLock(job, func(j *DownloadJob) struct{} {
-		paths = append([]string(nil), j.OutputPaths...)
-		metas = append([]settings.DownloadFileMeta(nil), j.FileMetas...)
-		return struct{}{}
-	})
-	if len(paths) > 0 {
-		return paths
-	}
-	if len(metas) > 0 {
-		derived := make([]string, 0, len(metas))
-		for _, meta := range metas {
-			if meta.Path != "" {
-				derived = append(derived, meta.Path)
-			}
-		}
-		if len(derived) > 0 {
-			return derived
-		}
-	}
-	tor := GetTorrent(job.Hash)
-	if tor == nil {
-		return nil
-	}
-	if tor.Torrent == nil {
-		if loaded := LoadTorrent(tor); loaded != nil {
-			tor = loaded
-		}
-	}
-	return collectOutputPathsFromTorrent(tor, job.Files)
-}
-
-func cleanupEmptyParents(current, base string) {
-	base = filepath.Clean(base)
-	if base == "" {
-		return
-	}
-	prefix := base + string(os.PathSeparator)
-	for current != base && strings.HasPrefix(current, prefix) {
-		entries, err := os.ReadDir(current)
-		if err != nil || len(entries) > 0 {
-			break
-		}
-		if err := os.Remove(current); err != nil {
-			break
-		}
-		current = filepath.Dir(current)
-	}
 }
 
 func newDownloadJob(hash, title, category, target string, files []int, outputs []string, metas []settings.DownloadFileMeta) *DownloadJob {
@@ -1034,30 +811,23 @@ func newDownloadJob(hash, title, category, target string, files []int, outputs [
 	}
 }
 
-// Public API
-
-func CreateDownloadJob(spec *torrent.TorrentSpec, title, poster, data, category string, files []int, targetPath string) (*DownloadJob, error) {
-	if spec == nil {
-		return nil, errors.New("invalid torrent spec")
-	}
-
-	tor, err := AddTorrent(spec, title, poster, data, category)
-	if err != nil {
-		return nil, err
-	}
-
-	return enqueueDownloadJob(tor, title, targetPath, files)
-}
-
-func CreateDownloadJobForTorrent(tor *Torrent, preferredTitle string, files []int, targetPath string) (*DownloadJob, error) {
+func CreateDownloadJobForTorrent(tor *Torrent, preferredTitle string, files []int) (*DownloadJob, error) {
 	if tor == nil {
 		return nil, errors.New("invalid torrent")
 	}
 
-	return enqueueDownloadJob(tor, preferredTitle, targetPath, files)
+	if preferredTitle == "" {
+		preferredTitle = tor.Title
+	}
+
+	if preferredTitle == "" {
+		preferredTitle = tor.Name()
+	}
+
+	return enqueueDownloadJob(tor, preferredTitle, files)
 }
 
-func enqueueDownloadJob(tor *Torrent, preferredTitle, targetPath string, files []int) (*DownloadJob, error) {
+func enqueueDownloadJob(tor *Torrent, preferredTitle string, files []int) (*DownloadJob, error) {
 	if settings.ReadOnly {
 		return nil, errors.New("download manager disabled in read-only mode")
 	}
@@ -1070,12 +840,12 @@ func enqueueDownloadJob(tor *Torrent, preferredTitle, targetPath string, files [
 		return nil, errors.New("failed to fetch torrent metadata")
 	}
 
-	resolvedPath, err := resolveJobTargetPath(targetPath, tor)
+	title := resolveDownloadTitle(tor, preferredTitle)
+	resolvedPath, err := resolveJobTargetPath(title, tor)
 	if err != nil {
 		return nil, err
 	}
 
-	title := resolveDownloadTitle(tor, preferredTitle)
 	hash := strings.ToLower(tor.Hash().HexString())
 	if hash == "" {
 		return nil, errors.New("invalid torrent hash")
@@ -1087,7 +857,11 @@ func enqueueDownloadJob(tor *Torrent, preferredTitle, targetPath string, files [
 
 	manager := getDownloadManager()
 	manager.enqueue(job)
-	go manager.syncStrm(job)
+
+	if !settings.BTsets.ForceGenerateStrmFiles {
+		removeLibraryStrm(hash)
+	}
+
 	return job.clone(), nil
 }
 
@@ -1115,108 +889,22 @@ func fallbackTitle(title string) string {
 	return title
 }
 
-func resolveJobTargetPath(targetPath string, tor *Torrent) (string, error) {
-	base := strings.TrimSpace(targetPath)
-	if base == "" {
-		base = settings.BTsets.DownloadPath
-		if base == "" {
-			return "", errors.New("download path is not configured")
-		}
-		if sub := categoryFolderName(tor); sub != "" {
-			base = filepath.Join(base, sub)
-		}
+func resolveJobTargetPath(title string, tor *Torrent) (string, error) {
+	base := ""
+	if title == "" && tor != nil {
+		title = strings.TrimSpace(tor.Title)
 	}
+	if title != "" {
+		base = utils.BuildMediaFolderName("downloads", tor.Category, title)
+	} else {
+		return "", errors.New("cannot resolve download title")
+	}
+
 	cleaned := filepath.Clean(base)
 	if err := os.MkdirAll(cleaned, 0o755); err != nil {
 		return "", err
 	}
 	return cleaned, nil
-}
-
-func categoryFolderName(tor *Torrent) string {
-	var category string
-	if tor != nil {
-		category = tor.Category
-	}
-	return settings.CategoryFolder(category)
-}
-
-func (m *downloadManager) handleStrmOnStart(job *DownloadJob) {
-	sets := settings.BTsets
-	if sets == nil {
-		return
-	}
-	if !(sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles) {
-		return
-	}
-	if sets.ForceGenerateStrmFiles {
-		if meta := m.buildStrmMetaForSelectedFiles(job); meta != nil {
-			go strm.SyncJob(meta)
-		}
-		return
-	}
-	if meta := m.buildStrmMetaForSelectedFiles(job); meta != nil {
-		go strm.RemoveJob(meta)
-	}
-	if hash := strings.TrimSpace(job.Hash); hash != "" {
-		go removeLibraryStrm(hash)
-	}
-}
-
-func (m *downloadManager) buildStrmMetaForSelectedFiles(job *DownloadJob) *strm.JobMeta {
-	if job == nil {
-		return nil
-	}
-	hash := strings.TrimSpace(job.Hash)
-	if hash == "" {
-		return nil
-	}
-	tor := GetTorrent(hash)
-	if tor == nil {
-		tor = findTorrentByHash(hash)
-	}
-	if tor == nil {
-		return nil
-	}
-	stats := libraryFileStats(tor)
-	if len(stats) == 0 {
-		return nil
-	}
-	selected := make(map[int]struct{})
-	job.mu.Lock()
-	files := append([]int(nil), job.Files...)
-	job.mu.Unlock()
-	for _, id := range files {
-		selected[id] = struct{}{}
-	}
-	includeAll := len(selected) == 0
-	meta := &strm.JobMeta{
-		JobID:      job.ID,
-		Hash:       hash,
-		Title:      job.Title,
-		Category:   job.Category,
-		TargetPath: defaultLibraryTargetPath(tor),
-		FlatLayout: true,
-	}
-	for _, st := range stats {
-		if st == nil || st.Id <= 0 {
-			continue
-		}
-		if !includeAll {
-			if _, ok := selected[st.Id]; !ok {
-				continue
-			}
-		}
-		path := strings.TrimSpace(st.Path)
-		if path == "" {
-			continue
-		}
-		meta.Files = append(meta.Files, strm.FileMeta{ID: st.Id, Path: path, Length: st.Length})
-	}
-	if len(meta.Files) == 0 {
-		return nil
-	}
-	return meta
 }
 
 func collectOutputPathsFromTorrent(tor *Torrent, selected []int) []string {
@@ -1277,34 +965,6 @@ func collectFileMetasFromTorrent(tor *Torrent, selected []int) []settings.Downlo
 		})
 	}
 	return metas
-}
-
-func (m *downloadManager) syncStrm(job *DownloadJob) {
-	if job == nil {
-		return
-	}
-	sets := settings.BTsets
-	if sets == nil {
-		return
-	}
-	if !(sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles) {
-		return
-	}
-	if !m.ensureFileMetas(job) {
-		return
-	}
-	files := m.filterFilesWithoutOtherJobs(job)
-	if len(files) == 0 {
-		return
-	}
-	meta := buildStrmMetaWithFiles(job, files)
-	if meta == nil {
-		return
-	}
-	strm.SyncJob(meta)
-	if tor := GetTorrent(job.Hash); tor != nil {
-		go syncLibraryStrm(tor)
-	}
 }
 
 func (m *downloadManager) ensureFileMetas(job *DownloadJob) bool {
@@ -1384,73 +1044,6 @@ func (m *downloadManager) filterFilesWithoutOtherJobs(job *DownloadJob) []settin
 	return res
 }
 
-func buildStrmMeta(job *DownloadJob, includeFiles bool) *strm.JobMeta {
-	if job == nil {
-		return nil
-	}
-	meta := &strm.JobMeta{
-		JobID:      job.ID,
-		Hash:       job.Hash,
-		Title:      job.Title,
-		Category:   job.Category,
-		TargetPath: job.TargetPath,
-		FlatLayout: true,
-	}
-	if !includeFiles {
-		return meta
-	}
-	job.mu.Lock()
-	files := append([]settings.DownloadFileMeta(nil), job.FileMetas...)
-	job.mu.Unlock()
-	if len(files) == 0 {
-		return nil
-	}
-	meta.Files = make([]strm.FileMeta, 0, len(files))
-	for _, f := range files {
-		if f.ID <= 0 {
-			continue
-		}
-		path := strings.TrimSpace(f.Path)
-		if path == "" {
-			continue
-		}
-		meta.Files = append(meta.Files, strm.FileMeta{ID: f.ID, Path: path, Length: f.Length})
-	}
-	if len(meta.Files) == 0 {
-		return nil
-	}
-	return meta
-}
-
-func buildStrmMetaWithFiles(job *DownloadJob, files []settings.DownloadFileMeta) *strm.JobMeta {
-	if job == nil || len(files) == 0 {
-		return nil
-	}
-	meta := &strm.JobMeta{
-		JobID:      job.ID,
-		Hash:       job.Hash,
-		Title:      job.Title,
-		Category:   job.Category,
-		TargetPath: job.TargetPath,
-		FlatLayout: true,
-	}
-	meta.Files = make([]strm.FileMeta, 0, len(files))
-	for _, f := range files {
-		if f.ID <= 0 {
-			continue
-		}
-		path := strings.TrimSpace(f.Path)
-		if path == "" {
-			continue
-		}
-		meta.Files = append(meta.Files, strm.FileMeta{ID: f.ID, Path: path, Length: f.Length})
-	}
-	if len(meta.Files) == 0 {
-		return nil
-	}
-	return meta
-}
-
 func ListDownloadJobs() []*DownloadJob {
 	return getDownloadManager().listJobs()
 }
@@ -1463,8 +1056,8 @@ func CancelDownloadJob(id string) bool {
 	return getDownloadManager().cancelJob(id)
 }
 
-func RemoveDownloadJob(id string, deleteFiles bool) bool {
-	return getDownloadManager().removeJob(id, deleteFiles)
+func RemoveDownloadJob(id string, deleteFiles bool, fullRemove bool) bool {
+	return getDownloadManager().removeJob(id, deleteFiles, fullRemove)
 }
 
 func PauseDownloadJob(id string) bool {
@@ -1475,8 +1068,8 @@ func ResumeDownloadJob(id string) error {
 	return getDownloadManager().resumeJob(id)
 }
 
-func RemoveDownloadJobsByHash(hash string, deleteFiles bool) int {
-	return getDownloadManager().removeJobsByHash(hash, deleteFiles)
+func RemoveDownloadJobsByHash(hash string, deleteFiles bool, fullRemove bool) int {
+	return getDownloadManager().removeJobsByHash(hash, deleteFiles, fullRemove)
 }
 
 func ListDownloadStatusesByHash(hash string) []*state.TorrentDownloadStatus {

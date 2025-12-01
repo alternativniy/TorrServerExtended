@@ -13,28 +13,37 @@ import (
 
 const libraryJobPrefix = "library"
 
-// RestoreLibraryStrm recreates STRM files for all torrents stored in the DB.
-func RestoreLibraryStrm() {
-	if !shouldGenerateLibraryStrm() {
+func CreateOrUpdateStrmJobForTorrent(tor *Torrent) {
+	if !settings.BTsets.GenerateStrmFiles && !settings.BTsets.ForceGenerateStrmFiles {
 		return
 	}
-	for _, torr := range ListTorrentsDB() {
-		syncLibraryStrm(torr)
+
+	if tor == nil {
+		return
 	}
+	meta := buildLibraryStrmMeta(tor)
+	if meta == nil {
+		return
+	}
+
+	strm.SyncJob(meta)
 }
 
-func syncLibraryStrm(tor *Torrent) {
-	if tor == nil || !shouldGenerateLibraryStrm() {
+func CreateOrUpdateStrmJobForTorrentByHash(hash string) {
+	if !settings.BTsets.GenerateStrmFiles && !settings.BTsets.ForceGenerateStrmFiles {
 		return
 	}
-	hash := strings.ToLower(tor.Hash().HexString())
-	if hash == "" {
+	norm := strings.ToLower(strings.TrimSpace(hash))
+	log.TLogln("strm: update strm library job for torrent hash:", norm)
+	if norm == "" {
 		return
 	}
-	removeLibraryStrm(hash)
-	if meta := buildLibraryStrmMeta(tor); meta != nil {
-		strm.SyncJob(meta)
+	tor := GetTorrent(norm)
+	log.TLogln("strm: found torrent for strm library job:", tor != nil, "hash:", norm, len(tor.GetDownloads()))
+	if tor == nil || (len(tor.GetDownloads()) > 0 && !settings.BTsets.ForceGenerateStrmFiles) {
+		return
 	}
+	CreateOrUpdateStrmJobForTorrent(tor)
 }
 
 func removeLibraryStrm(hash string) {
@@ -48,19 +57,6 @@ func removeLibraryStrm(hash string) {
 			return
 		}
 	}
-	legacy := &strm.JobMeta{
-		JobID: libraryJobID(norm),
-		Hash:  norm,
-	}
-	for _, category := range settings.CategoryFolders() {
-		legacy.Category = category
-		strm.RemoveJob(legacy)
-	}
-}
-
-func shouldGenerateLibraryStrm() bool {
-	sets := settings.BTsets
-	return sets != nil && (sets.GenerateStrmFiles || sets.ForceGenerateStrmFiles)
 }
 
 func buildLibraryStrmMeta(tor *Torrent) *strm.JobMeta {
@@ -75,6 +71,14 @@ func buildLibraryStrmMeta(tor *Torrent) *strm.JobMeta {
 	if len(stats) == 0 {
 		return nil
 	}
+
+	title := tor.Title
+	if title == "" {
+		if tor.Torrent != nil {
+			title = tor.Torrent.Name()
+		}
+	}
+
 	files := make([]strm.FileMeta, 0, len(stats))
 	for _, st := range stats {
 		if st == nil || st.Id <= 0 {
@@ -93,11 +97,10 @@ func buildLibraryStrmMeta(tor *Torrent) *strm.JobMeta {
 	return &strm.JobMeta{
 		JobID:      libraryJobID(hash),
 		Hash:       hash,
-		Title:      "",
+		Title:      title,
 		Category:   tor.Category,
 		TargetPath: target,
 		Files:      files,
-		FlatLayout: true,
 	}
 }
 

@@ -97,7 +97,9 @@ func addTorrent(req torrReqJS, c *gin.Context) {
 		return
 	}
 
-	tor, err := torr.AddTorrent(torrSpec, req.Title, req.Poster, req.Data, req.Category)
+	// Prefer client-provided Title when present; otherwise AddTorrent
+	// will derive and persist a normalized title for consistent paths.
+	tor, err := torr.AddTorrent(torrSpec, strings.TrimSpace(req.Title), req.Poster, req.Data, req.Category, req.DownloadToDisk)
 	// if tor.Data != "" && set.BTsets.EnableDebug {
 	// 	log.TLogln("torrent data:", tor.Data)
 	// }
@@ -110,30 +112,11 @@ func addTorrent(req torrReqJS, c *gin.Context) {
 		return
 	}
 
-	if req.DownloadToDisk {
-		if _, err := torr.CreateDownloadJobForTorrent(tor, req.Title, nil, ""); err != nil {
-			log.TLogln("error queue torrent download:", err)
-			c.AbortWithError(http.StatusInternalServerError, err)
-			return
-		}
-	}
-
 	go func() {
 		if !tor.GotInfo() {
 			log.TLogln("error add torrent:", "timeout connection get torrent info")
 			return
 		}
-
-		if tor.Title == "" {
-			tor.Title = torrSpec.DisplayName // prefer dn over name
-			tor.Title = strings.ReplaceAll(tor.Title, "rutor.info", "")
-			tor.Title = strings.ReplaceAll(tor.Title, "_", " ")
-			tor.Title = strings.Trim(tor.Title, " ")
-			if tor.Title == "" {
-				tor.Title = tor.Name()
-			}
-		}
-
 		if req.SaveToDB {
 			torr.SaveTorrentToDB(tor)
 		}
