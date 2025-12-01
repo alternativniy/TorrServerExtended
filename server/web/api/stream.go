@@ -1,10 +1,11 @@
 package api
 
 import (
-	"encoding/base64"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/pkg/errors"
 
 	mt "server/mimetype"
-	sets "server/settings"
 	"server/torr"
 	"server/torr/state"
 	utils2 "server/utils"
@@ -59,9 +59,6 @@ import (
 func stream(c *gin.Context) {
 	link := c.Query("link")
 	indexStr := c.Query("index")
-	localRootToken := c.Query("localroot")
-	localRelToken := c.Query("localrel")
-	localHash := strings.ToLower(strings.TrimSpace(c.Query("localhash")))
 	_, preload := c.GetQuery("preload")
 	_, stat := c.GetQuery("stat")
 	_, save := c.GetQuery("save")
@@ -91,14 +88,12 @@ func stream(c *gin.Context) {
 		return
 	}
 
-	if play && tryServeLocalStream(c, localHash, localRootToken, localRelToken, indexStr) {
-		return
-	}
-
 	link, _ = url.QueryUnescape(link)
 	title, _ = url.QueryUnescape(title)
 	poster, _ = url.QueryUnescape(poster)
 	category, _ = url.QueryUnescape(category)
+
+	log.Println("stream link:", link, "index:", indexStr, "preload:", preload, "stat:", stat, "m3u:", m3u, "fromlast:", fromlast, "play:", play, "save:", save, "title:", title, "poster:", poster, "category:", category)
 
 	spec, err := utils.ParseLink(link)
 	if err != nil {
@@ -173,7 +168,11 @@ func stream(c *gin.Context) {
 	} else
 	// return play if query
 	if play {
-		tor.Stream(index, c.Request, c.Writer)
+		if tryServeLocalStream(c, tor, index) {
+			return
+		} else {
+			tor.Stream(index, c.Request, c.Writer)
+		}
 		return
 	}
 }
@@ -275,37 +274,30 @@ func streamNoAuth(c *gin.Context) {
 	c.AbortWithStatus(http.StatusUnauthorized)
 }
 
-func tryServeLocalStream(c *gin.Context, localHash, rootToken, relToken, indexStr string) bool {
-	if rootToken == "" || relToken == "" {
-		return false
-	}
-	root, err := decodePathToken(rootToken)
-	if err != nil || root == "" {
-		return false
-	}
-	rel, err := decodePathToken(relToken)
-	if err != nil || rel == "" {
-		return false
-	}
-	full, ok := resolveLocalStreamPath(root, rel)
-	if !ok {
-		return false
-	}
+func tryServeLocalStream(c *gin.Context, tor *torr.Torrent, index int) bool {
+	basePath := utils2.BuildMediaFolderName("downloads", tor.Category, tor.Title)
+	fileName := tor.Files()[index-1].Path()
+	full := path.Join(basePath, fileName)
+
 	info, err := os.Stat(full)
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Println("file does not exist:", full)
+			return false
+		}
+		log.Println("stat error:", err)
 		return false
 	}
+	if !info.Mode().IsRegular() {
+		log.Println("not a regular file:", full)
+		return false
+	}
+
 	file, err := os.Open(full)
 	if err != nil {
 		return false
 	}
 	defer file.Close()
-
-	if localHash != "" {
-		if idx, err := strconv.Atoi(indexStr); err == nil && idx > 0 {
-			sets.SetViewed(&sets.Viewed{Hash: localHash, FileIndex: idx})
-		}
-	}
 
 	resp := c.Writer
 	req := c.Request
@@ -323,45 +315,4 @@ func tryServeLocalStream(c *gin.Context, localHash, rootToken, relToken, indexSt
 
 	http.ServeContent(resp, req, filepath.Base(full), info.ModTime(), file)
 	return true
-}
-
-func decodePathToken(token string) (string, error) {
-	data, err := base64.RawURLEncoding.DecodeString(token)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func resolveLocalStreamPath(root, rel string) (string, bool) {
-	cleanRoot := filepath.Clean(strings.TrimSpace(root))
-	if cleanRoot == "" {
-		return "", false
-	}
-	rel = sanitizeLocalRelative(rel)
-	if rel == "" {
-		return "", false
-	}
-	full := filepath.Join(cleanRoot, rel)
-	if cleanRoot != full {
-		prefix := cleanRoot + string(os.PathSeparator)
-		if !strings.HasPrefix(full, prefix) {
-			return "", false
-		}
-	}
-	return full, true
-}
-
-func sanitizeLocalRelative(rel string) string {
-	rel = strings.TrimSpace(rel)
-	if rel == "" {
-		return ""
-	}
-	rel = strings.ReplaceAll(rel, "\\", string(os.PathSeparator))
-	rel = filepath.Clean(rel)
-	rel = strings.TrimPrefix(rel, string(os.PathSeparator))
-	if rel == "." || rel == "" || strings.HasPrefix(rel, "..") {
-		return ""
-	}
-	return rel
 }
