@@ -41,6 +41,8 @@ export default function SecondarySettingsComponent({ settings, inputForm }) {
     MaxDownloadJobs,
     BlackholeDeleteSourceFiles,
     BlackholeRemoveFiles,
+    EnableFUSE,
+    FUSEPath,
   } = settings || {}
 
   return (
@@ -304,6 +306,27 @@ export default function SecondarySettingsComponent({ settings, inputForm }) {
         type='url'
         variant='outlined'
         fullWidth
+      />
+      <br />
+      <FormGroup>
+        <FormControlLabel
+          control={<Switch checked={EnableFUSE} onChange={inputForm} id='EnableFUSE' color='secondary' />}
+          label={t('SettingsDialog.EnableFUSE')}
+          labelPlacement='start'
+        />
+        <FormHelperText margin='none'>{t('SettingsDialog.EnableFUSEHint')}</FormHelperText>
+      </FormGroup>
+      <TextField
+        onChange={inputForm}
+        margin='normal'
+        id='FUSEPath'
+        label={t('SettingsDialog.FUSEPath')}
+        helperText={t('SettingsDialog.FUSEPathHint')}
+        value={FUSEPath}
+        type='text'
+        variant='outlined'
+        fullWidth
+        disabled={!EnableFUSE}
       />
       <br />
     </SecondarySettingsContent>

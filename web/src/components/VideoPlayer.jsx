@@ -244,12 +244,9 @@ const VideoPlayer = ({ videoSrc, captionSrc = '', title, onNotSupported }) => {
   }, [videoSrc, onNotSupported])
 
   const handlePlayPause = useCallback(() => {
-    if (!videoRef.current) return
-    if (videoRef.current.paused) {
-      videoRef.current.play()
-    } else {
-      videoRef.current.pause()
-    }
+    const video = videoRef.current
+    if (!video) return
+    video.paused ? video.play() : video.pause()
   }, [])
 
   const togglePlay = () => setPlaying(p => !p)
@@ -275,12 +272,11 @@ const VideoPlayer = ({ videoSrc, captionSrc = '', title, onNotSupported }) => {
 
   const skip = useCallback(
     secs => {
-      if (!videoRef.current) return
-      const durationLimit = duration || videoRef.current.duration || 0
-      const current = videoRef.current.currentTime || 0
-      const nextTime = Math.min(Math.max(current + secs, 0), durationLimit)
-      videoRef.current.currentTime = nextTime
-      setCurrentTime(nextTime)
+      const video = videoRef.current
+      if (!video) return
+      const target = Math.min(Math.max(video.currentTime + secs, 0), duration)
+      video.currentTime = target
+      setCurrentTime(target)
     },
     [duration],
   )

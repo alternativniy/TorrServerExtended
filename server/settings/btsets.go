@@ -69,6 +69,10 @@ type BTSets struct {
 	// Blackhole / auto-removal
 	BlackholeRemoveFiles       bool // remove downloaded files on auto-removal (not just STRM)
 	BlackholeDeleteSourceFiles bool // delete source .torrent/.magnet files from blackhole on successful import
+
+	// FUSE
+	EnableFUSE bool   // enable FUSE filesystem mount
+	FUSEPath   string // path where to mount FUSE filesystem
 }
 
 func (v *BTSets) String() string {
