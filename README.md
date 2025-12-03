@@ -16,7 +16,9 @@
 
 ---
 
-# TorrServer Extended 
+# TorrServer Extended
+
+# DO NOT USE THIS, IT'S STILL VERY BUGGY
 
 🔥 **TorrServer Extended** is a self‑hosted torrent streaming server with a modern web UI, simple HTTP API and first‑class Docker support. Point it to a torrent or magnet link and start watching immediately – no pre‑download required.
 
